@@ -2,7 +2,7 @@
 
 - 日期：2026-10-17
 - 依据：[需求梳理](./requirements.md)。本版收缩前版工程规模，保留已确认的架构与失败语义。
-- 当前状态：M1 [一对闭环](./step-1-results.md)、M2 [两组并发隔离](./step-2-pair-isolation-results.md)、M3 [明确断线恢复](./disconnect-reconnect-results.md)及[心跳检测静默失联](./heartbeat-silent-loss-results.md)、M4 [epoch 切换与迟到事件](./epoch-late-events-results.md)、M5 [远程工具忽略取消](./uncancellable-tool-results.md)、M6 重拨额度分项已验证。以下仍包含尚未实现的独立 cancel 消息及其他故障验收约定。
+- 当前状态：M1 [一对闭环](./step-1-results.md)、M2 [两组并发隔离](./step-2-pair-isolation-results.md)、M3 [明确断线恢复](./disconnect-reconnect-results.md)及[心跳检测静默失联](./heartbeat-silent-loss-results.md)、M4 [epoch 切换与迟到事件](./epoch-late-events-results.md)、M5 [远程工具忽略取消](./uncancellable-tool-results.md)、M6 重拨额度及[超时与结果竞争](./timeout-result-race-results.md)分项已验证。以下仍包含尚未实现的独立 cancel 消息及其他故障验收约定。
 
 ## 1. 最小实验到底做什么
 
@@ -66,6 +66,7 @@ type Executor interface {
 - 未就绪或已有调用时立即失败，不等上线、不排队；连接就绪等待只放在启动阶段。
 - request_id 由执行器生成；登记当前等待后再发送，防止快速结果先到。
 - 调用结果、超时、断线和代次变化只能结束等待一次；迟到结果不得修改终态。
+- Remote 的 `waitResult` 在任意等待分支唤醒后统一检查调用 context、原通道，再接受结果。即使结果已入队，终态检查时调用 context 已超时也只能返回失败；`Call` 返回时清除 pending，后续旧结果不能重新交付。该检查已用结果先到、超时先到和两者同时就绪三个时序验证。
 - 超时或主动取消时结束等待，尽力取消执行；已开始的操作可能继续，不能据失败推断未执行。
 - 若后续让 LocalExecutor 接入忽略取消的工具，也必须及时结束调用方等待，并保留实际执行占用直到工具退出。当前 Local 只装配合作退出的工具，本轮 M5 仅验证远程执行端。
 

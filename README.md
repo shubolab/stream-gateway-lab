@@ -116,6 +116,14 @@ go test -race -v -run '^TestEpochAndLateEvents$' .
 
 覆盖两条 WS 都保持不变时直接下发新 epoch（不先发离线通知），以及 A Brain／Executor 重连后的旧清理回调。旧调用失败并请求取消旧执行；在新调用仍执行时注入旧通道回调、旧 epoch 结果和旧调用 ID，确认新通道与新结果不受影响，B 原调用和新调用正常。状态切换与事件注入只在测试中进行，没有增加网关控制接口。
 
+调用超时与结果竞争可单独验证：
+
+```sh
+go test -race -v -run '^TestTimeout' .
+```
+
+覆盖结果先到、超时先到，以及超时和结果同时就绪时的终态选择；另用真实 WS 验证 A 的 500 ms 调用超时后只返回一次失败，执行端观察到取消，迟到成功被丢弃。恢复后，在新调用执行中注入两次旧结果，确认新调用只收到自己的结果，B 原调用、新调用和连接保持正常。500 ms 只来自测试传入的 context，运行时上限仍为 15 秒。
+
 静默失联测试只丢弃 A 链路的双向字节，不注入 TCP／WS 关闭，也不保存字节等恢复。网关和端点各自每 1 秒发 WS Ping，2 秒内未收到对应 Pong 就关闭这条连接，走原有的失联、取消与有限重连路径。正常本机调度下探测约需 2–3 秒；这不是硬实时保证。健康 B 即使没有业务消息也会正常响应心跳。
 
 ## 验证与边界
@@ -127,12 +135,12 @@ go vet ./...
 
 测试通过真实本机 WS 检查：统一大脑流程、本地与远程结果一致、工具错误回传、两组并发隔离、身份校验，以及明确断线／静默失联后的失败、取消、有限重连、恢复后只执行新调用。并发测试核对请求实际到达的 Executor 身份以及结果返回的 Brain，不只比较 echo 内容。
 
-[epoch 与迟到事件记录](docs/epoch-late-events-results.md)给出同连接换代、旧清理和旧结果隔离的证据；[工具忽略取消记录](docs/uncancellable-tool-results.md)、[心跳与静默失联记录](docs/heartbeat-silent-loss-results.md)、[断线与重连记录](docs/disconnect-reconnect-results.md)、[两组隔离记录](docs/step-2-pair-isolation-results.md)和[第一步记录](docs/step-1-results.md)保留前几轮验收。
+[超时与结果竞争记录](docs/timeout-result-race-results.md)给出本轮终态选择、取消和恢复证据；[epoch 与迟到事件记录](docs/epoch-late-events-results.md)、[工具忽略取消记录](docs/uncancellable-tool-results.md)、[心跳与静默失联记录](docs/heartbeat-silent-loss-results.md)、[断线与重连记录](docs/disconnect-reconnect-results.md)、[两组隔离记录](docs/step-2-pair-isolation-results.md)和[第一步记录](docs/step-1-results.md)保留前几轮验收。
 
 每组仍一次一个调用、单次 JSON 结果。网关按 pair 分别维护锁、连接与 epoch，只读路由外层并在线转发；两端只保留当前调用的工作内存，不保存完成结果，不排队、不重放、不落库。
 
 每次调用绑定原来的 socket 与 epoch；断线或通道变化就取消旧上下文，新连接不接管旧等待。执行槽一直保留到工具真正退出，旧结果不会改用新通道发送。已验证工具忽略取消时，恢复后的调用先返回忙碌，旧工具退出后容量恢复。取消不代表真实操作可以回滚。
 
-本轮仅补 epoch 切换与迟到事件的测试和记录，未改生产代码。独立 cancel 消息及调用超时与结果竞争等剩余验收仍未完成。调用超时／主动取消暂通过关闭本次 WS 请求执行端取消，之后仍按有限额度恢复连接。
+本轮将等待结果的分支汇入同一个终态检查，并补超时与结果竞争的测试和记录。独立 cancel 消息仍未实现；调用超时／主动取消沿用关闭本次 WS 请求执行端取消，之后仍按有限额度恢复连接。没有新增协议、依赖或 CLI 参数。
 
 完整实验的后续约定见[技术设计](docs/technical-design-and-implementation-plan.md)，不代表这些能力已经实现。

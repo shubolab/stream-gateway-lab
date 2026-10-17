@@ -99,24 +99,29 @@ func (e *RemoteExecutor) Call(ctx context.Context, tool string, input json.RawMe
 	if err := e.client.send(ctx, s, toolMessage{Kind: "call", ID: p.id, Tool: tool, Input: input, TimeoutMS: remaining}); err != nil {
 		return nil, err
 	}
+	return e.waitResult(ctx, p)
+}
+
+func (e *RemoteExecutor) waitResult(ctx context.Context, p *pendingCall) (json.RawMessage, error) {
+	s := p.channel
+	var result toolMessage
 	select {
 	case <-ctx.Done():
-		// No separate cancel message yet: close this channel to request cancellation.
-		e.client.disconnect(s, ctx.Err())
-		return nil, ctx.Err()
 	case <-s.ctx.Done():
-		return nil, context.Cause(s.ctx)
-	case result := <-p.result:
-		if ctx.Err() != nil {
-			e.client.disconnect(s, ctx.Err())
-			return nil, ctx.Err()
-		}
-		if s.ctx.Err() != nil {
-			return nil, context.Cause(s.ctx)
-		}
-		if result.Error != "" {
-			return nil, fmt.Errorf("tool failed: %s", result.Error)
-		}
-		return result.Output, nil
+	case result = <-p.result:
 	}
+	// select may choose a result even when the deadline is already ready.
+	// All wakeups pass the same terminal checks before accepting success.
+	if err := ctx.Err(); err != nil {
+		// No separate cancel message yet: close this channel to request cancellation.
+		e.client.disconnect(s, err)
+		return nil, err
+	}
+	if err := context.Cause(s.ctx); err != nil {
+		return nil, err
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("tool failed: %s", result.Error)
+	}
+	return result.Output, nil
 }
