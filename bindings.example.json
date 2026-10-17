@@ -1,0 +1,12 @@
+[
+  {
+    "pair": "A",
+    "brain_token_env": "LAB_BRAIN_TOKEN",
+    "executor_token_env": "LAB_EXECUTOR_TOKEN"
+  },
+  {
+    "pair": "B",
+    "brain_token_env": "LAB_BRAIN_B_TOKEN",
+    "executor_token_env": "LAB_EXECUTOR_B_TOKEN"
+  }
+]
