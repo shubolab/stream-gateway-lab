@@ -61,4 +61,19 @@ print("VERIFIED:4")
 
 Markdown 修复已发布到 homelab 的 `agent-chat-20261018-03`。Gateway、Cloudflare 隧道服务正常，服务器本机返回的静态资源与构建内容一致，模型配置和成功的验收会话在重启后保留。
 
-发布后的公网复核遇到 TLS 连接超时 / EOF 和浏览器 `ERR_QUIC_PROTOCOL_ERROR`；公网 `app.js` 已成功取回并匹配，其他资源的公网完整下载以及公网浏览器最终截图未能完成。服务器本机访问正常，本记录不把本地显示验收等同于公网浏览器验收。
+首次发布后的公网复核曾遇到 TLS 连接超时 / EOF 和浏览器 `ERR_QUIC_PROTOCOL_ERROR`，当时只完成本地页面和部分公网资源验证。该连接问题随后完成排查和修复，详见下节。
+
+## 公网页面补充验收（2026-10-18 深夜至 10-19 零点）
+
+问题位于验收 Mac 的 Clash 路由：`DOMAIN-KEYWORD,shubolab.com,DIRECT` 抢先匹配 Gateway 域名，失败连接实际走 `DIRECT`。在当前订阅的持久规则中添加更高优先级的 `DOMAIN,gateway-lab.shubolab.com,Others`，通过 Clash Verge「重新激活订阅」生成并应用运行配置。其他域名的直连规则保留。Gateway、Cloudflare 配置及 TLS 校验均未调整。
+
+修复后的实测结果：
+
+- 普通 HTTPS 请求返回 200，证书校验成功；独立 Python SSL 探测在 2026-10-19 00:00:06 使用 TLS 1.3 成功取得 `HTTP/1.1 200 OK`。
+- Clash 运行时首条规则匹配上述精确域名，浏览器 TCP、UDP 连接均走 `Others → VLESS → VLESS-REALITY-443`。
+- 首页、`app.js`、`style.css`、`vendor/marked.umd.js`、`vendor/purify.min.js` 从公网完整下载，与仓库对应文件逐字节一致。
+- 在 `https://gateway-lab.shubolab.com/` 实际登录工作台并打开本记录中的真实模型会话，页面可读、可展开工具结果，未再出现 TLS / QUIC 错误页。
+- 展开的修复后 `execute` 结果显示执行机器 `wangshubodeMacBook-Pro.local`、`VERIFIED:4`、`EXIT_CODE=0`，stderr 为空。
+- 最终报告在公网 DOM 中生成 9 个标题、4 个有序步骤、5 个代码块、26 处段落或列表中的行内代码及 6 处粗体；浏览器截图确认标题、列表、代码缩进和代码块背景正常显示。
+
+这次补充验收复核的是前文已完成的真实模型轮次，没有重新执行机器任务。复核时 2 台已注册 Executor 均离线，页面正确显示「仅聊天」并禁用机器工具；之前的执行记录仍可查看。截图保存在本地 `dist/real-model-markdown-public.png` 与 `dist/real-model-tool-result-public.png`。

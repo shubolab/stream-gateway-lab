@@ -58,3 +58,19 @@ Go race 测试和静态检查通过；6 项真实进程集成测试在 macOS 和
 验收细节见 [第三阶段说明](agent-chat.md) 和 [第二阶段验收记录](pool-acceptance-results.md)。
 
 后续发布 `releases/agent-chat-20261018-03` 增加 Markdown 渲染，保留既有模型配置、Executor 和会话。真实模型 `glm-5.3-flash` 已在在线 Mac Executor 上完成脚本修复闭环，证据见 [真实模型验收记录](real-model-acceptance.md)。
+
+## 公网 TLS / QUIC 连接排查记录
+
+2026-10-18 深夜，本机访问域名出现 TLS 超时 / EOF 和浏览器 `ERR_QUIC_PROTOCOL_ERROR`。homelab 上两个服务均处于 active 状态，Cloudflare 隧道有 4 条连接，源站资源正常；其他出口的 TLS 探测也成功。进一步检查验收 Mac 的 Clash `/connections`，失败流量命中了 `DOMAIN-KEYWORD,shubolab.com,DIRECT`。这是该客户端的直连路径问题，不能仅凭浏览器错误码判定 Gateway、证书或 cloudflared 的 QUIC 隧道故障。
+
+修复是在当前 Clash 订阅的持久规则覆写中加入精确域名例外，放在其他 `shubolab.com` 规则之前：
+
+```yaml
+prepend:
+  - DOMAIN,gateway-lab.shubolab.com,Others
+  # 后面保留现有规则
+```
+
+本机覆写文件位于 Clash Verge 配置目录的 `profiles/rwCsZkz397ZX.yaml`，修改前已备份。通过「重新激活订阅」应用后，用 [Mihomo API](https://wiki.metacubex.one/api/) 的 `/rules` 和 `/connections` 确认新规则生效，TCP、UDP 流量均进入现有 `Others` 出口。本机后台服务使用独立运行目录；直接通过 API 请求重载桌面目录下的配置会被路径校验拒绝，应由 Clash Verge 生成并应用配置。
+
+修复后普通 HTTPS、校验证书的 TLS 1.3 探测和公网页面均成功，完整静态资源与发布内容一致，真实模型会话及 Markdown 显示已在公网浏览器复核。这次没有调整服务器、Cloudflare 或应用代码，线上仍为 `agent-chat-20261018-03`。上述客户端规则依赖本机已有的 `Others` 代理组；其他机器排查时应先确认自己的实际连接路径。
