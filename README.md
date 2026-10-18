@@ -2,6 +2,8 @@
 
 当前实验：两对大脑（Brain）和执行端（Executor）通过同一个网关（Gateway）并发调用 `echo`、`wait`；支持心跳检测静默失联及有限重连，旧调用失败且不重放。一个 Go 程序、三个角色入口、两组静态绑定，没有其他服务依赖。
 
+代码阅读与持续讨论入口：[docs/code_study](docs/code_study/README.md)，包含架构图、`ctx`／`pair`／`epoch` 术语对照、调用与恢复时序，以及讨论记录。
+
 `main.go` 的 `runBrain` 是唯一的大脑流程：先调用 echo，从结果读取 `wait_ms`，再决定 wait 的参数。启动时选择 `LocalExecutor` 或 `RemoteExecutor`，大脑流程完全相同。
 
 ```text

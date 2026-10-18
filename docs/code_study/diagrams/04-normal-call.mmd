@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant B as runBrain
+    participant R as Brain 的 RemoteExecutor / client
+    participant G as Gateway 的 pairRoute A
+    participant E as Executor 的 client / endpoint
+    participant T as executeTool
+    Note over R,E: 双方已连接，网关生成本轮 epoch E1
+    G->>E: state：epoch=E1（先通知执行端）
+    G->>R: state：epoch=E1
+    B->>R: Call(ctx, echo, input)
+    R->>R: 取原 channel；先登记 pending R1
+    R->>G: data E1 / call R1 / timeout_ms
+    G->>G: 检查当前 peer、epoch、对端
+    G->>E: 原样转发 data
+    E->>E: 检查 epoch；TryLock 占用 slot
+    E->>T: goroutine 中执行 echo(toolCtx)
+    Note over E,T: 工具运行期间，WS 读循环与心跳仍继续
+    T-->>E: output
+    E->>E: 释放 slot；检查原通道仍有效
+    E->>G: data E1 / result R1 / output
+    G->>R: 校验后原样转发
+    R->>R: 匹配 channel 和 id；投递收件箱
+    R->>R: 检查调用 ctx、原通道；清除 pending
+    R-->>B: echo 结果
+    B->>B: 从结果读取 wait_ms
+    B->>R: Call(ctx, wait, ms)：新 id R2
+    Note over R,E: 再走同一路径；正常情况下仍使用 E1

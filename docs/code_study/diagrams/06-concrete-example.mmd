@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant B as Brain 进程<br/>安排调用、读取结果
+    participant G as Gateway 进程<br/>转发给同组另一端
+    participant E as Executor 进程<br/>真正运行工具
+    Note over B: 操作者填写<br/>文字：A-only<br/>时长：800 毫秒<br/>即 0.8 秒
+    B->>G: 调用 echo<br/>输入：message=A-only，wait_ms=800
+    G->>E: 原样转发 echo 请求
+    Note over E: executeTool：echo<br/>复制输入，原样返回
+    E-->>G: echo 输出<br/>message=A-only，wait_ms=800
+    G-->>B: 原样转发 echo 结果
+    Note over B: runBrain 读取结果<br/>取出 wait_ms=800<br/>新参数：ms=800
+    B->>G: 调用 wait<br/>输入：ms=800
+    G->>E: 原样转发 wait 请求
+    Note over E: executeTool：wait<br/>等待 800 毫秒
+    E-->>G: wait 输出：waited_ms=800
+    G-->>B: 原样转发 wait 结果
+    Note over B: runBrain 汇总输出<br/>run 打印结果列表

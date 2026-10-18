@@ -1,0 +1,25 @@
+sequenceDiagram
+    participant B as Brain A
+    participant G as Gateway / pair A
+    participant E as Executor A
+    participant T as 旧工具 R1
+    Note over B,T: 当前 epoch E1，R1 正在执行
+    B-xG: Brain 的 WS 断开
+    Note over B,E: 两侧各自处理失联，发生顺序不要求同步
+    B->>B: 作废旧 channel；旧 Call 失败并清除 pending
+    G->>G: remove 旧 peer；清空 epoch
+    G->>E: state：epoch 为空
+    E->>E: 取消旧 channel.ctx
+    E->>T: toolCtx 因父级取消而结束
+    T-->>E: 合作工具返回
+    E->>E: 释放 slot；丢弃旧结果
+    Note over B,E: Executor 的健康 WS 保持；Brain 若仍运行则有限重拨
+    B->>G: 5 秒间隔后重拨（须有剩余额度）
+    G->>G: 新 Brain peer；生成 epoch E2
+    G->>E: state：epoch=E2
+    G->>B: state：epoch=E2
+    Note over B,E: 两端创建新 channel；没有 R1 的重放或结果补发
+    B->>G: 显式新调用 R2，epoch=E2
+    G->>E: 在线转发 R2
+    E-->>G: result R2
+    G-->>B: result R2
