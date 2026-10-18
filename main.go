@@ -123,87 +123,83 @@ func runBrainInput(ctx context.Context, executor Executor) error {
 }
 
 func run(ctx context.Context, args []string) error {
-	if len(args) == 0 || (args[0] != "gateway" && args[0] != "brain" && args[0] != "executor") {
-		return errors.New("usage: stream-gateway-lab gateway|brain|executor [flags]")
+	if len(args) > 0 {
+		switch args[0] {
+		case "gateway":
+			return runGatewayCommand(ctx, args[1:])
+		case "brain":
+			return runBrainCommand(ctx, args[1:])
+		case "executor":
+			return runExecutorCommand(ctx, args[1:])
+		}
 	}
-	role := args[0]
-	flags := flag.NewFlagSet(role, flag.ContinueOnError)
+	return errors.New("usage: stream-gateway-lab gateway|brain|executor [flags]")
+}
+
+// Gateway：读取全部绑定，创建路由，启动 HTTP 服务。
+func runGatewayCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("gateway", flag.ContinueOnError)
 	config := flags.String("config", "bindings.example.json", "static bindings configuration")
-	mode, address := "remote", "ws://127.0.0.1:8787/ws"
-	pair, message, waitMS := "A", "hello from brain", 200
-	stdin := false
-	if role == "brain" {
-		flags.StringVar(&mode, "mode", mode, "local or remote")
-		flags.StringVar(&message, "message", message, "echo marker for this experiment")
-		flags.IntVar(&waitMS, "wait-ms", waitMS, "mock wait duration, 0 to 30000 ms")
-		flags.BoolVar(&stdin, "stdin", false, "read explicit brain requests as JSON lines; no automatic call retry")
-	}
-	if role != "gateway" {
-		flags.StringVar(&address, "url", address, "gateway WebSocket URL")
-		flags.StringVar(&pair, "pair", pair, "binding to use")
-	}
-	if err := flags.Parse(args[1:]); err != nil {
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || (mode != "local" && mode != "remote") || waitMS < 0 || waitMS > 30000 {
+	if flags.NArg() != 0 {
 		return errors.New("invalid arguments")
 	}
-	if role == "gateway" {
-		log.Printf("role=gateway pid=%d", os.Getpid())
-	} else {
-		log.Printf("role=%s pid=%d mode=%s pair=%s", role, os.Getpid(), mode, pair)
+	log.Printf("role=gateway pid=%d", os.Getpid())
+
+	bindings, err := loadBindings(*config)
+	if err != nil {
+		return err
 	}
+	g, err := newGateway(bindings)
+	if err != nil {
+		return err
+	}
+	defer g.close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:8787")
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Handler: g, ReadHeaderTimeout: 5 * time.Second}
+	stop := context.AfterFunc(ctx, func() { server.Close() })
+	defer stop()
+	log.Printf("gateway listening on %s bindings=%d", listener.Addr(), len(g.pairs))
+	err = server.Serve(listener)
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+// Brain：选择本地或远程 Executor，再运行一次请求或读取标准输入。
+func runBrainCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("brain", flag.ContinueOnError)
+	config := flags.String("config", "bindings.example.json", "static bindings configuration")
+	mode := flags.String("mode", "remote", "local or remote")
+	address := flags.String("url", "ws://127.0.0.1:8787/ws", "gateway WebSocket URL")
+	pair := flags.String("pair", "A", "binding to use")
+	message := flags.String("message", "hello from brain", "echo marker for this experiment")
+	waitMS := flags.Int("wait-ms", 200, "mock wait duration, 0 to 30000 ms")
+	stdin := flags.Bool("stdin", false, "read explicit brain requests as JSON lines; no automatic call retry")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || (*mode != "local" && *mode != "remote") || *waitMS < 0 || *waitMS > 30000 {
+		return errors.New("invalid arguments")
+	}
+	log.Printf("role=brain pid=%d mode=%s pair=%s", os.Getpid(), *mode, *pair)
+
+	// 本地模式直接使用工具；只有远程模式需要配置、凭证和连接。
 	var executor Executor = &LocalExecutor{}
 	inputCtx := ctx
-	if role != "brain" || mode != "local" {
-		data, err := os.ReadFile(*config)
+	if *mode == "remote" {
+		token, err := loadBindingToken(*config, *pair, "brain")
 		if err != nil {
 			return err
 		}
-		var bindings []binding
-		if err := json.Unmarshal(data, &bindings); err != nil || len(bindings) == 0 {
-			return errors.New("configuration must be a nonempty array of bindings")
-		}
-		if role == "gateway" {
-			g, err := newGateway(bindings)
-			if err != nil {
-				return err
-			}
-			defer g.close()
-			listener, err := net.Listen("tcp", "127.0.0.1:8787")
-			if err != nil {
-				return err
-			}
-			server := &http.Server{Handler: g, ReadHeaderTimeout: 5 * time.Second}
-			stop := context.AfterFunc(ctx, func() { server.Close() })
-			defer stop()
-			log.Printf("gateway listening on %s bindings=%d", listener.Addr(), len(g.pairs))
-			err = server.Serve(listener)
-			if errors.Is(err, http.ErrServerClosed) {
-				return nil
-			}
-			return err
-		}
-		var selected *binding
-		for i := range bindings {
-			if bindings[i].Pair == pair {
-				if selected != nil {
-					return fmt.Errorf("duplicate pair: %q", pair)
-				}
-				selected = &bindings[i]
-			}
-		}
-		if selected == nil {
-			return fmt.Errorf("unknown pair: %q", pair)
-		}
-		token, err := selected.token(role)
-		if err != nil {
-			return err
-		}
-		if role == "executor" {
-			return runExecutor(ctx, address, pair, token)
-		}
-		remote, err := newRemoteExecutor(ctx, address, pair, token)
+		remote, err := newRemoteExecutor(ctx, *address, *pair, token)
 		if err != nil {
 			return err
 		}
@@ -211,16 +207,70 @@ func run(ctx context.Context, args []string) error {
 		executor = remote
 		inputCtx = remote.client.ctx
 	}
-	if stdin {
+
+	if *stdin {
 		return runBrainInput(inputCtx, executor)
 	}
-	results, err := runBrain(ctx, executor, message, waitMS)
+	results, err := runBrain(ctx, executor, *message, *waitMS)
 	if err != nil {
 		return err
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(results)
+}
+
+// Executor：读取本组执行端凭证，连接网关并处理工具调用。
+func runExecutorCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("executor", flag.ContinueOnError)
+	config := flags.String("config", "bindings.example.json", "static bindings configuration")
+	address := flags.String("url", "ws://127.0.0.1:8787/ws", "gateway WebSocket URL")
+	pair := flags.String("pair", "A", "binding to use")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("invalid arguments")
+	}
+	log.Printf("role=executor pid=%d mode=remote pair=%s", os.Getpid(), *pair)
+
+	token, err := loadBindingToken(*config, *pair, "executor")
+	if err != nil {
+		return err
+	}
+	return runExecutor(ctx, *address, *pair, token)
+}
+
+func loadBindings(path string) ([]binding, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var bindings []binding
+	if err := json.Unmarshal(data, &bindings); err != nil || len(bindings) == 0 {
+		return nil, errors.New("configuration must be a nonempty array of bindings")
+	}
+	return bindings, nil
+}
+
+func loadBindingToken(path, pair, role string) (string, error) {
+	bindings, err := loadBindings(path)
+	if err != nil {
+		return "", err
+	}
+	var selected *binding
+	for i := range bindings {
+		if bindings[i].Pair == pair {
+			if selected != nil {
+				return "", fmt.Errorf("duplicate pair: %q", pair)
+			}
+			selected = &bindings[i]
+		}
+	}
+	if selected == nil {
+		return "", fmt.Errorf("unknown pair: %q", pair)
+	}
+	return selected.token(role)
 }
 
 func main() {
