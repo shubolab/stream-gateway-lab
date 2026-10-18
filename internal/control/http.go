@@ -48,6 +48,7 @@ func (s *Server) newRouter() *gin.Engine {
 	r.GET("/", page)
 	r.GET("/app.js", page)
 	r.GET("/style.css", page)
+	r.GET("/vendor/*filepath", page)
 	r.GET("/ws", s.socket)
 	r.GET("/install.sh", func(c *gin.Context) {
 		data, _ := assets.ReadFile("install.sh")

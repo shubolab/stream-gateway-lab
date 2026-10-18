@@ -10,7 +10,7 @@ sh scripts/build-distribution.sh
 ./dist/stream-gateway-lab gateway -listen 0.0.0.0:8787
 ```
 
-打开 Gateway 地址，用 `data/admin-token` 登录，在侧栏「模型设置」填写 API 地址、模型名称和密钥，保存后下一轮生效，无需重启。接入或更新 Executor，然后选机器和工作目录开始会话。会话与轮记录落盘；支持多轮上下文、工具轨迹和停止。目前已用 Responses 测试服务验证真实 DeepAgents / Go 进程的完整修复链路，真实模型效果仍待验收。
+打开 Gateway 地址，用 `data/admin-token` 登录，在侧栏「模型设置」填写 API 地址、模型名称和密钥，保存后下一轮生效，无需重启。接入或更新 Executor，然后选机器和工作目录开始会话。会话与轮记录落盘；支持多轮上下文、工具轨迹和停止。已通过 Responses 集成测试，并使用页面配置的 `glm-5.3-flash` 在在线 Mac Executor 上完成真实修复闭环，见 [验收记录](docs/real-model-acceptance.md)。聊天回复支持 Markdown 标题、列表、代码块和表格。
 
 详细状态机、目录职责、API 配置和验收步骤见 [第三阶段说明](docs/agent-chat.md)。公网入口：[gateway-lab.shubolab.com](https://gateway-lab.shubolab.com)，服务器模型配置位于 `/var/lib/stream-gateway-lab/model.json`。
 

@@ -51,8 +51,10 @@ ssh homelab 'sudo systemctl restart stream-gateway-lab'
 
 ## 2026-10-18 发布记录
 
-当前发布目录为 `releases/agent-chat-20261018-02`，包含聊天工作台和页面模型设置。Python 3.13 环境在 homelab 上根据锁定依赖独立安装；机器工具未变化，Executor 下载产物与 `agent-chat-20261018-01` 相同。旧发行目录和 systemd 模板保留用于回滚。
+模型设置发布目录为 `releases/agent-chat-20261018-02`，包含聊天工作台和页面模型设置。Python 3.13 环境在 homelab 上根据锁定依赖独立安装；机器工具未变化，Executor 下载产物与 `agent-chat-20261018-01` 相同。旧发行目录和 systemd 模板保留用于回滚。
 
-Go race 测试和静态检查通过；6 项真实进程集成测试在 macOS 和 homelab Linux 上通过。页面模型配置的校验、留空保留密钥、保存后下一轮生效均已验证。公网页面、模型配置管理接口和双平台下载可用，原有 2 个 Executor 注册身份保留。尚未填写真实模型凭证，供应商连接与真实推理效果待配置后验收。
+Go race 测试和静态检查通过；6 项真实进程集成测试在 macOS 和 homelab Linux 上通过。页面模型配置的校验、留空保留密钥、保存后下一轮生效均已验证。公网页面、模型配置管理接口和双平台下载可用，原有 2 个 Executor 注册身份保留。该版本发布时尚未填写真实模型凭证。
 
 验收细节见 [第三阶段说明](agent-chat.md) 和 [第二阶段验收记录](pool-acceptance-results.md)。
+
+后续发布 `releases/agent-chat-20261018-03` 增加 Markdown 渲染，保留既有模型配置、Executor 和会话。真实模型 `glm-5.3-flash` 已在在线 Mac Executor 上完成脚本修复闭环，证据见 [真实模型验收记录](real-model-acceptance.md)。

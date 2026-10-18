@@ -66,8 +66,16 @@ function renderComposer() {
   $('composer-note').textContent = !session ? '每个会话固定绑定一台 Executor' : session.mode === 'chat_only' ? '仅聊天 · 机器工具已禁用' : session.mode === 'busy' ? '执行端正在处理其他会话' : '完全访问 · 工具直接执行';
 }
 function renderText(parent, text) {
-  const parts = String(text).split(/```[^\n]*\n([\s\S]*?)```/g);
-  parts.forEach((part, index) => { if (part) parent.append(node(index % 2 ? 'pre' : 'p', part)); });
+  const html = marked.parse(String(text), {gfm: true, breaks: true});
+  const content = DOMPurify.sanitize(html, {
+    RETURN_DOM_FRAGMENT: true,
+    ALLOWED_TAGS: ['p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'del', 'blockquote', 'ul', 'ol', 'li', 'pre', 'code', 'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'input'],
+    ALLOWED_ATTR: ['href', 'title', 'start', 'type', 'checked', 'disabled'],
+  });
+  content.querySelectorAll('a').forEach(link => { link.target = '_blank'; link.rel = 'noopener noreferrer'; });
+  content.querySelectorAll('input').forEach(input => { input.type = 'checkbox'; input.disabled = true; });
+  content.querySelectorAll('table').forEach(table => { const wrapper = node('div', undefined, 'markdown-table'); table.replaceWith(wrapper); wrapper.append(table); });
+  parent.append(content);
 }
 function renderTimeline() {
   const key = selected + JSON.stringify(detail);
