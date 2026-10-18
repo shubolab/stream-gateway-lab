@@ -4,6 +4,8 @@
 
 首轮梳理：2026-10-18。源码基线：`a3ae18f`。本目录记录阅读与讨论，不意味着已经决定重构；后续代码变化时，相关解释和证据也要同步更新。
 
+2026-10-18 分包更新：源码现位于 `internal/app`、`internal/gateway`、`internal/endpoint`、`internal/transport`，测试位于 `test/`。主题笔记中的源码链接和名称已同步；旧讨论与历史测试命令保留当时的上下文，迁移对照与验证见[讨论 006](discussions/2026-10-18-006-package-and-test-layout.md)。
+
 ## 从这里开始
 
 | 顺序 | 笔记 | 主要回答 |
@@ -19,6 +21,8 @@
 | 持续记录 | [讨论 002：理解 epoch](discussions/2026-10-18-002-epoch-meaning.md) | 词义、官方协议对照与场次比喻。 |
 | 持续记录 | [讨论 003：发音与相近词](discussions/2026-10-18-003-pronunciation-and-similar-terms.md) | epoch 的音标，以及 eBPF、epoll、Envoy 等候选。 |
 | 持续记录 | [讨论 004：先把例子讲明白](discussions/2026-10-18-004-concrete-brain-example.md) | 修正从抽象接口讲起的顺序，先解释操作者输入和模拟流程，再展开函数与消息。 |
+| 持续记录 | [讨论 005：配对状态锁的压测评估待办](discussions/2026-10-18-005-pair-lock-performance-todo.md) | 记录 `PairRoute.Mu` 的性能评估范围；尚未压测或确定优化方案。 |
+| 持续记录 | [讨论 006：按职责分包并集中测试](discussions/2026-10-18-006-package-and-test-layout.md) | 四个内部包、原生 Go 测试、名称可见性与迁移前后验证。 |
 
 先记住这五句话：
 
@@ -29,6 +33,10 @@
 5. **`ctx` 是本进程内的取消与期限信号**：每看到一个 ctx，先问“它管哪段工作，由谁结束”。
 
 ![整体架构](diagrams/01-architecture.svg)
+
+## 待办
+
+- [ ] [评估 `PairRoute.Mu` 在压测下对吞吐和延迟的影响](discussions/2026-10-18-005-pair-lock-performance-todo.md)：重点观察持锁网络写入、同组锁等待及断线清理，根据测量结果梳理和优化持锁范围。
 
 ## 后续怎样持续整理
 

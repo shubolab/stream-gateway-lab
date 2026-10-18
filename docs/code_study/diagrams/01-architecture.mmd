@@ -1,22 +1,22 @@
 flowchart TB
     subgraph BP[Brain 进程 A]
-        B[runBrain<br/>先 echo，再 wait]
+        B[RunBrain<br/>先 echo，再 wait]
         I[Executor.Call<br/>统一调用接口]
         L[LocalExecutor<br/>本地模式]
-        LT[executeTool<br/>本进程工具]
-        R[RemoteExecutor + client<br/>Brain 内的远程代理]
+        LT[ExecuteTool<br/>本进程工具]
+        R[RemoteExecutor + Client<br/>Brain 内的远程代理]
         B --> I
         I -->|启动时选择| L
         L --> LT
         I -->|启动时选择| R
     end
     subgraph GP[Gateway 进程]
-        GA[pairRoute A<br/>鉴权与在线转发<br/>当前连接 + epoch]
-        GB[pairRoute B<br/>独立状态与锁]
+        GA[PairRoute A<br/>鉴权与在线转发<br/>当前连接 + epoch]
+        GB[PairRoute B<br/>独立状态与锁]
     end
     subgraph EP[Executor 进程 A]
-        E[client + executorEndpoint<br/>接收调用、持有执行槽]
-        T[executeTool<br/>echo / wait]
+        E[Client + ExecutorEndpoint<br/>接收调用、持有执行槽]
+        T[ExecuteTool<br/>echo / wait]
         E --> T
     end
     BB[Brain 进程 B<br/>同一份代码，pair=B]

@@ -1,4 +1,4 @@
-package main
+package endpoint
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func executeTool(ctx context.Context, name string, input json.RawMessage) (json.RawMessage, error) {
+func ExecuteTool(ctx context.Context, name string, input json.RawMessage) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

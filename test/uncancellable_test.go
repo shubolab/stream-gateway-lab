@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"context"
@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"stream-gateway-lab/internal/endpoint"
+	"stream-gateway-lab/internal/transport"
 )
 
 func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
@@ -18,7 +21,7 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			g := testGateway(t, "A", "B")
 			server := httptest.NewServer(g)
-			t.Cleanup(func() { cancel(); g.close(); server.Close() })
+			t.Cleanup(func() { cancel(); g.Close(); server.Close() })
 			address := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
 
 			// Only this test tool ignores cancellation. Release it after the
@@ -32,25 +35,25 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 			bStarted := make(chan struct{}, 1)
 			var aWaits, aEchoes atomic.Int32
 			// Observe results on Brain A's current channel before matching IDs.
-			aResults := make(chan toolMessage, 8)
-			nextResult := func() toolMessage {
+			aResults := make(chan transport.ToolMessage, 8)
+			nextResult := func() transport.ToolMessage {
 				t.Helper()
 				select {
 				case msg := <-aResults:
 					return msg
 				case <-ctx.Done():
 					t.Fatal("missing WS result")
-					return toolMessage{}
+					return transport.ToolMessage{}
 				}
 			}
-			endpoints := make(map[string]*executorEndpoint)
-			brains := make(map[string]*RemoteExecutor)
+			endpoints := make(map[string]*endpoint.ExecutorEndpoint)
+			brains := make(map[string]*endpoint.RemoteExecutor)
 			for _, pair := range []string{"A", "B"} {
-				c, err := newClient(ctx, address, pair, "executor", "test-executor-"+pair)
+				c, err := endpoint.NewClient(ctx, address, pair, "executor", "test-executor-"+pair)
 				if err != nil {
 					t.Fatal(err)
 				}
-				e := &executorEndpoint{client: c, execute: func(toolCtx context.Context, name string, input json.RawMessage) (json.RawMessage, error) {
+				e := &endpoint.ExecutorEndpoint{Client: c, Execute: func(toolCtx context.Context, name string, input json.RawMessage) (json.RawMessage, error) {
 					if pair == "A" && name == "wait" {
 						if aWaits.Add(1) != 1 {
 							return nil, errors.New("old wait unexpectedly replayed")
@@ -71,19 +74,19 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 					if pair == "B" && name == "wait" {
 						bStarted <- struct{}{}
 					}
-					return executeTool(toolCtx, name, input)
+					return endpoint.ExecuteTool(toolCtx, name, input)
 				}}
 				endpoints[pair] = e
-				go c.run(e.receive)
-				brainClient, err := newClient(ctx, address, pair, "brain", "test-brain-"+pair)
+				go c.Run(e.Receive)
+				brainClient, err := endpoint.NewClient(ctx, address, pair, "brain", "test-brain-"+pair)
 				if err != nil {
 					t.Fatal(err)
 				}
-				brain := &RemoteExecutor{client: brainClient}
+				brain := &endpoint.RemoteExecutor{Client: brainClient}
 				brains[pair] = brain
-				go brainClient.run(func(s *channel, body json.RawMessage) error {
+				go brainClient.Run(func(s *endpoint.Channel, body json.RawMessage) error {
 					if pair == "A" {
-						var msg toolMessage
+						var msg transport.ToolMessage
 						if err := json.Unmarshal(body, &msg); err != nil {
 							return err
 						}
@@ -93,20 +96,20 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 							return ctx.Err()
 						}
 					}
-					return brain.receive(s, body)
+					return brain.Receive(s, body)
 				})
-				if err := brainClient.waitReady(ctx); err != nil {
+				if err := brainClient.WaitReady(ctx); err != nil {
 					t.Fatal(err)
 				}
-				if err := c.waitReady(ctx); err != nil {
+				if err := c.WaitReady(ctx); err != nil {
 					t.Fatal(err)
 				}
 			}
 
 			a, b := brains["A"], brains["B"]
 			aEndpoint := endpoints["A"]
-			oldA, oldExecutor := a.client.snapshot(), aEndpoint.client.snapshot()
-			oldB, oldBExecutor := b.client.snapshot(), endpoints["B"].client.snapshot()
+			oldA, oldExecutor := a.Client.Snapshot(), aEndpoint.Client.Snapshot()
+			oldB, oldBExecutor := b.Client.Snapshot(), endpoints["B"].Client.Snapshot()
 			oldDone, bDone := make(chan error, 1), make(chan error, 1)
 			go func() {
 				_, err := a.Call(ctx, "wait", json.RawMessage(`{"ms":12000}`))
@@ -130,9 +133,9 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("B tool did not start")
 			}
-			g.pairs["A"].mu.Lock()
-			conn := g.pairs["A"].peers[lostRole].conn
-			g.pairs["A"].mu.Unlock()
+			g.Pairs["A"].Mu.Lock()
+			conn := g.Pairs["A"].Peers[lostRole].Conn
+			g.Pairs["A"].Mu.Unlock()
 			lostAt := time.Now()
 			conn.CloseNow()
 			select {
@@ -162,17 +165,17 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 			case <-time.After(2 * time.Second):
 				t.Fatal("B did not finish while A was disconnected")
 			}
-			if err := a.client.waitReady(ctx); err != nil {
+			if err := a.Client.WaitReady(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if err := aEndpoint.client.waitReady(ctx); err != nil {
+			if err := aEndpoint.Client.WaitReady(ctx); err != nil {
 				t.Fatal(err)
 			}
-			freshA, freshExecutor := a.client.snapshot(), aEndpoint.client.snapshot()
-			if freshA == nil || freshExecutor == nil || freshA.epoch == oldA.epoch || freshExecutor.epoch != freshA.epoch || oldA.ctx.Err() == nil || oldExecutor.ctx.Err() == nil {
+			freshA, freshExecutor := a.Client.Snapshot(), aEndpoint.Client.Snapshot()
+			if freshA == nil || freshExecutor == nil || freshA.Epoch == oldA.Epoch || freshExecutor.Epoch != freshA.Epoch || oldA.Ctx.Err() == nil || oldExecutor.Ctx.Err() == nil {
 				t.Fatal("reconnection must invalidate the old channel and create a new epoch")
 			}
-			if (lostRole == "brain" && freshExecutor.conn != oldExecutor.conn) || (lostRole == "executor" && freshA.conn != oldA.conn) {
+			if (lostRole == "brain" && freshExecutor.Conn != oldExecutor.Conn) || (lostRole == "executor" && freshA.Conn != oldA.Conn) {
 				t.Fatal("healthy A socket was replaced")
 			}
 			select {
@@ -208,7 +211,7 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 			}
 			// Wait for actual execution-slot release, not just Call returning.
 			free := make(chan struct{})
-			go func() { aEndpoint.slot.Lock(); aEndpoint.slot.Unlock(); close(free) }()
+			go func() { aEndpoint.Slot.Lock(); aEndpoint.Slot.Unlock(); close(free) }()
 			select {
 			case <-free:
 			case <-time.After(time.Second):
@@ -230,7 +233,7 @@ func TestUncancellableToolKeepsSlotAcrossReconnect(t *testing.T) {
 			if aWaits.Load() != 1 || aEchoes.Load() != 1 {
 				t.Fatalf("old call replayed or busy call queued: waits=%d echoes=%d", aWaits.Load(), aEchoes.Load())
 			}
-			if b.client.snapshot() != oldB || endpoints["B"].client.snapshot() != oldBExecutor {
+			if b.Client.Snapshot() != oldB || endpoints["B"].Client.Snapshot() != oldBExecutor {
 				t.Fatal("B's channels changed")
 			}
 			t.Log("old success discarded; busy request never executed; fresh request succeeded; B unchanged")

@@ -1,4 +1,4 @@
-package main
+package endpoint
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"stream-gateway-lab/internal/transport"
 )
 
 type Executor interface {
@@ -20,51 +22,51 @@ func (e *LocalExecutor) Call(ctx context.Context, tool string, input json.RawMes
 		return nil, errors.New("executor busy")
 	}
 	defer e.slot.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	ctx, cancel := context.WithTimeout(ctx, transport.CallTimeout)
 	defer cancel()
-	output, err := executeTool(ctx, tool, input)
+	output, err := ExecuteTool(ctx, tool, input)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	return output, err
 }
 
-type pendingCall struct {
-	id      string
-	channel *channel
-	result  chan toolMessage
+type PendingCall struct {
+	ID      string
+	Channel *Channel
+	Result  chan transport.ToolMessage
 }
 
 type RemoteExecutor struct {
-	client  *client
-	mu      sync.Mutex
-	pending *pendingCall
+	Client  *Client
+	Mu      sync.Mutex // 保护 Pending；测试检查当前调用时也必须持锁。
+	Pending *PendingCall
 }
 
-func newRemoteExecutor(ctx context.Context, address, pair, token string) (*RemoteExecutor, error) {
-	c, err := newClient(ctx, address, pair, "brain", token)
+func NewRemoteExecutor(ctx context.Context, address, pair, token string) (*RemoteExecutor, error) {
+	c, err := NewClient(ctx, address, pair, "brain", token)
 	if err != nil {
 		return nil, err
 	}
-	e := &RemoteExecutor{client: c}
-	go c.run(e.receive)
-	if err := c.waitReady(ctx); err != nil {
-		c.stop(err)
+	e := &RemoteExecutor{Client: c}
+	go c.Run(e.Receive)
+	if err := c.WaitReady(ctx); err != nil {
+		c.Stop(err)
 		return nil, err
 	}
 	return e, nil
 }
 
-func (e *RemoteExecutor) receive(s *channel, body json.RawMessage) error {
-	var msg toolMessage
+func (e *RemoteExecutor) Receive(s *Channel, body json.RawMessage) error {
+	var msg transport.ToolMessage
 	if err := json.Unmarshal(body, &msg); err != nil || msg.Kind != "result" || msg.ID == "" || (len(msg.Output) == 0) == (msg.Error == "") {
 		return errors.New("invalid tool result")
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.pending != nil && e.pending.channel == s && msg.ID == e.pending.id {
+	e.Mu.Lock()
+	defer e.Mu.Unlock()
+	if e.Pending != nil && e.Pending.Channel == s && msg.ID == e.Pending.ID {
 		select {
-		case e.pending.result <- msg:
+		case e.Pending.Result <- msg:
 		default: // No queue or completed-result store; ignore duplicate delivery.
 		}
 	}
@@ -72,52 +74,52 @@ func (e *RemoteExecutor) receive(s *channel, body json.RawMessage) error {
 }
 
 func (e *RemoteExecutor) Call(ctx context.Context, tool string, input json.RawMessage) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	ctx, cancel := context.WithTimeout(ctx, transport.CallTimeout)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	s := e.client.snapshot()
+	s := e.Client.Snapshot()
 	if s == nil {
 		return nil, errors.New("endpoint unavailable")
 	}
-	p := &pendingCall{id: newID(), channel: s, result: make(chan toolMessage, 1)}
-	e.mu.Lock()
-	if e.pending != nil {
-		e.mu.Unlock()
+	p := &PendingCall{ID: transport.NewID(), Channel: s, Result: make(chan transport.ToolMessage, 1)}
+	e.Mu.Lock()
+	if e.Pending != nil {
+		e.Mu.Unlock()
 		return nil, errors.New("executor busy")
 	}
-	e.pending = p // Register before sending, even for an immediate echo response.
-	e.mu.Unlock()
+	e.Pending = p // Register before sending, even for an immediate echo response.
+	e.Mu.Unlock()
 	defer func() {
-		e.mu.Lock()
-		e.pending = nil
-		e.mu.Unlock()
+		e.Mu.Lock()
+		e.Pending = nil
+		e.Mu.Unlock()
 	}()
 	deadline, _ := ctx.Deadline()
 	remaining := max(1, time.Until(deadline).Milliseconds())
-	if err := e.client.send(ctx, s, toolMessage{Kind: "call", ID: p.id, Tool: tool, Input: input, TimeoutMS: remaining}); err != nil {
+	if err := e.Client.Send(ctx, s, transport.ToolMessage{Kind: "call", ID: p.ID, Tool: tool, Input: input, TimeoutMS: remaining}); err != nil {
 		return nil, err
 	}
-	return e.waitResult(ctx, p)
+	return e.WaitResult(ctx, p)
 }
 
-func (e *RemoteExecutor) waitResult(ctx context.Context, p *pendingCall) (json.RawMessage, error) {
-	s := p.channel
-	var result toolMessage
+func (e *RemoteExecutor) WaitResult(ctx context.Context, p *PendingCall) (json.RawMessage, error) {
+	s := p.Channel
+	var result transport.ToolMessage
 	select {
 	case <-ctx.Done():
-	case <-s.ctx.Done():
-	case result = <-p.result:
+	case <-s.Ctx.Done():
+	case result = <-p.Result:
 	}
 	// select may choose a result even when the deadline is already ready.
 	// All wakeups pass the same terminal checks before accepting success.
 	if err := ctx.Err(); err != nil {
 		// No separate cancel message yet: close this channel to request cancellation.
-		e.client.disconnect(s, err)
+		e.Client.Disconnect(s, err)
 		return nil, err
 	}
-	if err := context.Cause(s.ctx); err != nil {
+	if err := context.Cause(s.Ctx); err != nil {
 		return nil, err
 	}
 	if result.Error != "" {

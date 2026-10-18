@@ -56,7 +56,7 @@
 若 E1 的旧结果迟到：它属于上一场，不能进入 E2 的新调用。
 ```
 
-E1、E2、R1 等只是讲解代号。实际 epoch 由网关调用 `newID()` 生成随机字符串；它不是 1、2、3 的递增计数，也不是时间戳。
+E1、E2、R1 等只是讲解代号。实际 epoch 由网关调用 `NewID()` 生成随机字符串；它不是 1、2、3 的递增计数，也不是时间戳。
 
 可以用三个问题记住区别：
 
@@ -87,13 +87,13 @@ E1、E2、R1 等只是讲解代号。实际 epoch 由网关调用 `newID()` 生�
 
 | 步骤 | 代码位置 | 用场次语言理解 |
 | --- | --- | --- |
-| 双方配齐：`g.epoch = newID()` | [`gateway.go`](../../gateway.go)：`pairRoute.ServeHTTP` | 网关给新一场连线发一个新标识，先通知 Executor，再通知 Brain。 |
-| 转发检查：`msg.Epoch == g.epoch` | 同函数的 data 转发分支 | 消息必须属于当前这一场；同时还须满足当前 peer、对端在线等条件。 |
-| 断线：`g.epoch = ""` | `pairRoute.remove` | 当前已没有有效场次，通知仍在线的另一端。 |
-| 收到不同 epoch 时 `invalidateLocked(...)` | [`client.go`](../../client.go)：`readConnection` | 上一场失效，先取消旧 channel.ctx，再接受新的非空 epoch。 |
-| 以原 channel 发送，按 channel 和 id 交付 | `client.send`、[`RemoteExecutor.receive`](../../executor.go) | 旧执行不能借新场次发结果，旧结果不能交给新的等待者。 |
+| 双方配齐：`g.Epoch = NewID()` | [`gateway.go`](../../internal/gateway/gateway.go)：`PairRoute.ServeHTTP` | 网关给新一场连线发一个新标识，先通知 Executor，再通知 Brain。 |
+| 转发检查：`msg.Epoch == g.Epoch` | 同函数的 data 转发分支 | 消息必须属于当前这一场；同时还须满足当前 peer、对端在线等条件。 |
+| 断线：`g.Epoch = ""` | `PairRoute.Remove` | 当前已没有有效场次，通知仍在线的另一端。 |
+| 收到不同 epoch 时 `invalidateLocked(...)` | [`client.go`](../../internal/endpoint/client.go)：`readConnection` | 上一场失效，先取消旧 Channel.Ctx，再接受新的非空 epoch。 |
+| 以原 channel 发送，按 channel 和 id 交付 | `Client.Send`、[`RemoteExecutor.Receive`](../../internal/endpoint/executor.go) | 旧执行不能借新场次发结果，旧结果不能交给新的等待者。 |
 
-`epoch` 这个字段来自本工程自己定义的 [`envelope`](../../protocol.go)，不是 WebSocket 库自动生成的字段。是否进入新场次也不是单看 Executor 自己重拨了几次，而是由网关的配对状态决定。
+`epoch` 这个字段来自本工程自己定义的 [`Envelope`](../../internal/transport/protocol.go)，不是 WebSocket 库自动生成的字段。是否进入新场次也不是单看 Executor 自己重拨了几次，而是由网关的配对状态决定。
 
 ## 本轮建议的中文叫法
 

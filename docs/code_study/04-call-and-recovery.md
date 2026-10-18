@@ -2,7 +2,7 @@
 
 ## 先认出线上两层消息
 
-外层 `envelope` 由通信层处理，内层 `toolMessage` 由 Brain 和 Executor 处理。定义都在 [`protocol.go`](../../protocol.go)。
+外层 `Envelope` 由通信层处理，内层 `ToolMessage` 由 Brain 和 Executor 处理。定义都在 [`protocol.go`](../../internal/transport/protocol.go)。
 
 双方配齐后，网关发送状态：
 
@@ -59,18 +59,18 @@ Executor 返回：
 
 按代码跟一次 echo：
 
-1. `main.run` 装配 `RemoteExecutor`。`newRemoteExecutor` 启动 client 的读取／重连循环，并在启动阶段 `waitReady`。
+1. `app.runBrainCommand` 装配 `RemoteExecutor`。`NewRemoteExecutor` 启动 client 的读取／重连循环，并在启动阶段 `WaitReady`。
 2. 网关在双方配齐后生成 E1，**先给 Executor 发 state，再给 Brain 发 state**。这样工具请求不会先于执行端的通道状态到达。
-3. `runBrain` 调用 `RemoteExecutor.Call`。它创建本次调用期限，取得当前 channel 引用 `s`。
+3. `RunBrain` 调用 `RemoteExecutor.Call`。它创建本次调用期限，取得当前 channel 引用 `s`。
 4. `Call` 先登记 `pending={id:R1, channel:s, result:收件箱}`，再发送。否则 echo 太快时，结果可能先于等待记录到达。
-5. `client.send` 检查 `s` 仍是当前有效通道，装上 epoch，用 WS 发出 data。
+5. `Client.Send` 检查 `s` 仍是当前有效通道，装上 epoch，用 WS 发出 data。
 6. 网关校验当前接入对象、epoch 和对端连接，将整条 data 原样转发，不理解 echo。
-7. Executor 的 `client.readConnection` 再核对本端连接与 epoch，然后调用 `executorEndpoint.receive`。拿到 slot 后启动 goroutine 执行工具，读循环继续收消息和处理心跳。
+7. Executor 的 `Client.readConnection` 再核对本端连接与 epoch，然后调用 `ExecutorEndpoint.Receive`。拿到 slot 后启动 goroutine 执行工具，读循环继续收消息和处理心跳。
 8. 工具返回后，执行端释放 slot。原通道失效就丢结果，否则带着**原来的 s** 发送 R1 的 result。
-9. Brain 读循环把结果交给 `RemoteExecutor.receive`，匹配原 channel 和 R1 后放入 pending.result。
-10. `waitResult` 统一检查调用期限、原通道是否失效，再接受结果。`Call` 返回时清空 pending。
+9. Brain 读循环把结果交给 `RemoteExecutor.Receive`，匹配原 channel 和 R1 后放入 Pending.Result。
+10. `WaitResult` 统一检查调用期限、原通道是否失效，再接受结果。`Call` 返回时清空 pending。
 
-`runBrain` 再从 echo 的输出读取 `wait_ms`，发起另一次 wait。它有新的调用 id，但正常情况下继续使用 E1。
+`RunBrain` 再从 echo 的输出读取 `wait_ms`，发起另一次 wait。它有新的调用 id，但正常情况下继续使用 E1。
 
 “启动时等就绪”和“调用时等上线”要区分：构造 RemoteExecutor 时可以等对端；已有代理在离线期间收到 Call，会立即返回 `endpoint unavailable`，不会把新业务请求放进队列。
 
@@ -82,16 +82,16 @@ Executor 返回：
 
 断线会触发两个本地处理过程，它们不要求瞬间同时完成：
 
-- Brain 的读取失败后，`client.run` 作废旧 channel；`waitResult` 因 `s.ctx.Done()` 返回失败，清除旧 pending。
-- 网关 `pairRoute.remove` 删除离线 Brain 的 peer，清空 epoch，向健康 Executor 发 `{"type":"state","epoch":""}`。Executor 作废旧 channel，其 toolCtx 收到取消。
+- Brain 的读取失败后，`Client.Run` 作废旧 channel；`WaitResult` 因 `s.Ctx.Done()` 返回失败，清除旧 pending。
+- 网关 `PairRoute.Remove` 删除离线 Brain 的 peer，清空 epoch，向健康 Executor 发 `{"type":"state","epoch":""}`。Executor 作废旧 channel，其 toolCtx 收到取消。
 
 Brain 若仍在运行，则按固定间隔、有额度地重拨。Executor 的 WS 可以继续使用。双方重新配齐时，网关生成 E2；两端分别创建新的 channel 对象。
 
 **旧调用的结果不会因为 E2 恢复就重新有效。** E2 上的操作必须是新的显式 Call，有新的 id。
 
-CLI 的默认 Brain 只跑一轮 `runBrain`，调用失败后可能直接退出，不会保持进程等你再次调用。手工验证同一 Brain 恢复后接新任务，使用根 [README](../../README.md) 中的 `-stdin` 模式；测试则在同一进程保留代理对象。
+CLI 的默认 Brain 只跑一轮 `RunBrain`，调用失败后可能直接退出，不会保持进程等你再次调用。手工验证同一 Brain 恢复后接新任务，使用根 [README](../../README.md) 中的 `-stdin` 模式；测试则在同一进程保留代理对象。
 
-如果没有收到空 epoch，直接收到不同的非空 E2，也会先取消 E1，再创建 E2。这个分支由 `client.readConnection` 中的 epoch 不等判断实现。`TestEpochAndLateEvents/same-sockets` 专门在两条 WS 都不变的情况下测试它；这是测试注入，不是产品暴露了“手动换代”接口。
+如果没有收到空 epoch，直接收到不同的非空 E2，也会先取消 E1，再创建 E2。这个分支由 `Client.readConnection` 中的 epoch 不等判断实现。`TestEpochAndLateEvents/same-sockets` 专门在两条 WS 都不变的情况下测试它；这是测试注入，不是产品暴露了“手动换代”接口。
 
 ## 场景三：通道恢复了，但旧工具不肯停
 
@@ -110,7 +110,7 @@ Executor：旧 R1 的 toolCtx 已取消，但工具函数还没返回
 
 ## 场景四：结果和超时几乎同时到达
 
-`select` 在多个分支都就绪时，不保证优先挑超时。因此 `waitResult` 不能把“从收件箱读到结果”直接当成成功。
+`select` 在多个分支都就绪时，不保证优先挑超时。因此 `WaitResult` 不能把“从收件箱读到结果”直接当成成功。
 
 现在的顺序是：
 
@@ -132,12 +132,12 @@ result.error 非空？ → 返回工具错误
 
 | 防线 | 代码位置 | 避免的具体问题 |
 | --- | --- | --- |
-| 发送绑定原 channel | `client.send` | 旧工具不能拿自己的旧 s 借用新通道发结果。 |
-| 网关检查 peer、epoch、对端 | `pairRoute.ServeHTTP` | 旧接入或旧 epoch 的 data 不能被转发到当前对端。 |
-| 接收检查 conn、epoch | `client.readConnection` | 已经在网络中的旧 data 到达后仍不能进入当前处理函数。 |
-| 交付检查 pending.channel、id | `RemoteExecutor.receive` | 同 epoch 的旧 id，或带新 id 的旧 channel 回调，不能结束新调用。 |
-| 清理检查当前 channel 和 conn | `client.disconnect` | 旧调用的迟到超时／清理不能关掉新通道，哪怕复用了同一 WS。 |
-| 删除检查当前 peer 身份 | `pairRoute.remove` | 旧连接的迟到清理不能删掉替换后的新 peer。 |
+| 发送绑定原 channel | `Client.Send` | 旧工具不能拿自己的旧 s 借用新通道发结果。 |
+| 网关检查 peer、epoch、对端 | `PairRoute.ServeHTTP` | 旧接入或旧 epoch 的 data 不能被转发到当前对端。 |
+| 接收检查 conn、epoch | `Client.readConnection` | 已经在网络中的旧 data 到达后仍不能进入当前处理函数。 |
+| 交付检查 Pending.Channel、id | `RemoteExecutor.Receive` | 同 epoch 的旧 id，或带新 id 的旧 channel 回调，不能结束新调用。 |
+| 清理检查当前 channel 和 conn | `Client.Disconnect` | 旧调用的迟到超时／清理不能关掉新通道，哪怕复用了同一 WS。 |
+| 删除检查当前 peer 身份 | `PairRoute.Remove` | 旧连接的迟到清理不能删掉替换后的新 peer。 |
 
 这不是用很多编号重复解决同一件事：pair 管路由归属，epoch 管通信轮次，id 管一次调用，对象身份管本地迟到回调。
 

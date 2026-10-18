@@ -16,7 +16,7 @@
 | --- | --- |
 | 进程 | 一个 Gateway、两个 Brain、两个 Executor；每个端点进程一个逻辑实例。 |
 | 绑定 | A、B 两组静态一对一绑定；本机先以独立 Brain 进程验证，不增加单进程多实例调度。 |
-| 语言与组织 | Go、一个 module、一个程序、三个角色入口；职责按文件划分。 |
+| 语言与组织 | Go、一个 module、一个程序、三个角色入口；现有职责分到四个内部包。 |
 | 工具 | 产品提供合作取消的 `echo` 和 `wait`；M5 在测试中注入有限时长忽略取消的 wait，不增加运行参数。 |
 | 调用 | 每个绑定一次最多一个调用，返回一次 JSON 结果。 |
 | 鉴权 | 手工配置，每个 `(pair, role)` 独立 token；不开发账号或配对系统。 |
@@ -29,27 +29,28 @@ Go 与 `github.com/coder/websocket` 沿用前版选择；实现时固定兼容�
 
 ## 2. 文件与职责
 
-先保持一个 package，不为复用提前拆出多层框架：
+最初以单包验证闭环；2026-10-18 按现有职责整理为四个内部包，并将测试集中到 `test/`。这次只调整文件归属、导入和跨包名称，没有新增业务能力或抽象层。
 
 ```text
-main.go               # gateway / brain / executor 参数与装配，固定实验场景
-protocol.go           # 两种外层消息与两端的工具消息类型
-gateway.go            # 鉴权、配对、在线转发
-client.go             # 两端共用 WS 连接、当前代次、有限重连
-heartbeat.go          # 每条 WS 独立 Ping/Pong，超时结束该连接
-executor.go           # 统一接口、Local / Remote、当前调用等待
-executor_endpoint.go  # 一个执行槽、工具运行、取消与丢弃旧结果
-tools.go              # echo、wait
-lab_test.go           # 少量针对核心行为与竞态的检查
-reconnect_test.go     # 明确断线／静默失联、恢复与重拨额度检查
-heartbeat_test.go     # 只用于测试的双向丢包转发器
-uncancellable_test.go # 工具忽略取消时的执行槽、忙碌、旧结果与隔离验证
-epoch_test.go         # 同连接换代、旧连接清理与迟到结果的隔离验证
+main.go                         # 仅调用 app.Main
+internal/app/app.go              # gateway / brain / executor 参数、准备和启动
+internal/app/brain.go            # 同一份 echo → wait 流程及逐行输入
+internal/gateway/binding.go      # 静态绑定与凭证环境变量
+internal/gateway/gateway.go      # 鉴权、配对、在线转发
+internal/endpoint/client.go      # 两端共用连接、当前代次、有限重连
+internal/endpoint/executor.go    # 统一接口、Local / Remote、当前调用等待
+internal/endpoint/executor_endpoint.go # 一个执行槽、取消与丢弃旧结果
+internal/endpoint/tools.go       # echo、wait
+internal/transport/protocol.go   # 两种外层消息、工具消息及共用常量
+internal/transport/heartbeat.go  # 每条 WS 独立 Ping/Pong
+internal/transport/frame.go      # 有限超时的 WebSocket 写入
+test/                          # 原有 7 个 *_test.go
 bindings.example.json
 ```
 
-网关处理函数只能读取路由外层，不解释工具名、参数或执行状态。`main.go` 中的大脑决策函数只调用 Executor；WS 和重连留在 client 与 RemoteExecutor。
+依赖方向为 `main → app → gateway / endpoint → transport`。网关处理函数只能读取路由外层，不解释工具名、参数或执行状态。`app.RunBrain` 只调用 `endpoint.Executor`；WS 和重连留在 `endpoint.Client` 与 `RemoteExecutor`。
 
+测试仍使用原生 `go test ./...`。移到独立目录后，原有白盒检查通过 `internal` 包中必要的导出名称访问原对象，不增加测试框架、复制实现或临时生成源码。
 一个逻辑大脑对应一个 RemoteExecutor、一条 WS 和一个当前等待槽；不能让两个逻辑大脑共用一个全局等待槽。Executor 每进程一个执行身份、一个实际执行槽。
 
 ## 3. 统一调用接口
@@ -66,7 +67,7 @@ type Executor interface {
 - 未就绪或已有调用时立即失败，不等上线、不排队；连接就绪等待只放在启动阶段。
 - request_id 由执行器生成；登记当前等待后再发送，防止快速结果先到。
 - 调用结果、超时、断线和代次变化只能结束等待一次；迟到结果不得修改终态。
-- Remote 的 `waitResult` 在任意等待分支唤醒后统一检查调用 context、原通道，再接受结果。即使结果已入队，终态检查时调用 context 已超时也只能返回失败；`Call` 返回时清除 pending，后续旧结果不能重新交付。该检查已用结果先到、超时先到和两者同时就绪三个时序验证。
+- Remote 的 `WaitResult` 在任意等待分支唤醒后统一检查调用 context、原通道，再接受结果。即使结果已入队，终态检查时调用 context 已超时也只能返回失败；`Call` 返回时清除 pending，后续旧结果不能重新交付。该检查已用结果先到、超时先到和两者同时就绪三个时序验证。
 - 超时或主动取消时结束等待，尽力取消执行；已开始的操作可能继续，不能据失败推断未执行。
 - 若后续让 LocalExecutor 接入忽略取消的工具，也必须及时结束调用方等待，并保留实际执行占用直到工具退出。当前 Local 只装配合作退出的工具，本轮 M5 仅验证远程执行端。
 
@@ -226,7 +227,7 @@ go run . brain -pair B -message B-only -wait-ms 1200
 
 ### 本轮审查发现与处理
 
-- **前版范围偏重：**多个内部包、自动实验命令、配置生成、通用故障设施与大规模用例不是架构验证的前提，本版删除。
+- **前版范围偏重：**最初删除了为未来复用预设的多层工程结构、自动实验命令、配置生成、通用故障设施与大规模用例。当前四个内部包是读完现有代码后按已有职责整理，不恢复上述能力。
 - **需求到技术规则的具体缺口：**需求已要求“新代次主动取消旧执行”，前版技术章节主要写了 down 通知和本端失联。本版明确任何 epoch 变化都先取消旧上下文，不要求旧 down 必达；M4 单独验证。
 - **已有防护，继续保留：**身份与绑定检查、旧 socket 清理保护、旧结果隔离、有限等待、单次结束、写入与消息大小上限。它们不扩展产品功能，直接保护实验结论。
 - **已接受的取舍：**无结果恢复，断线失败不代表未执行，取消不保证回滚，不提供恰好执行一次。它们不再反复作为待讨论项。

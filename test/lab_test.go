@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"bytes"
@@ -12,18 +12,23 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"stream-gateway-lab/internal/app"
+	"stream-gateway-lab/internal/endpoint"
+	"stream-gateway-lab/internal/gateway"
+	"stream-gateway-lab/internal/transport"
 )
 
-func testGateway(t *testing.T, pairs ...string) *gateway {
+func testGateway(t *testing.T, pairs ...string) *gateway.Gateway {
 	t.Helper()
-	var bindings []binding
+	var bindings []gateway.Binding
 	for _, pair := range pairs {
-		b := binding{Pair: pair, BrainTokenEnv: "TEST_BRAIN_" + pair, ExecutorTokenEnv: "TEST_EXECUTOR_" + pair}
+		b := gateway.Binding{Pair: pair, BrainTokenEnv: "TEST_BRAIN_" + pair, ExecutorTokenEnv: "TEST_EXECUTOR_" + pair}
 		t.Setenv(b.BrainTokenEnv, "test-brain-"+pair)
 		t.Setenv(b.ExecutorTokenEnv, "test-executor-"+pair)
 		bindings = append(bindings, b)
 	}
-	g, err := newGateway(bindings)
+	g, err := gateway.New(bindings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,21 +39,21 @@ func TestBrainMatchesAcrossExecutors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	g := testGateway(t, "A")
 	server := httptest.NewServer(g)
-	t.Cleanup(func() { cancel(); g.close(); server.Close() })
+	t.Cleanup(func() { cancel(); g.Close(); server.Close() })
 	address := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
 	executorDone := make(chan error, 1)
-	go func() { executorDone <- runExecutor(ctx, address, "A", "test-executor-A") }()
-	remote, err := newRemoteExecutor(ctx, address, "A", "test-brain-A")
+	go func() { executorDone <- endpoint.RunExecutor(ctx, address, "A", "test-executor-A") }()
+	remote, err := endpoint.NewRemoteExecutor(ctx, address, "A", "test-brain-A")
 	if err != nil {
 		t.Fatal(err)
 	}
-	local := &LocalExecutor{}
+	local := &endpoint.LocalExecutor{}
 	var previous []byte
 	for _, item := range []struct {
 		name string
-		exec Executor
+		exec endpoint.Executor
 	}{{"local", local}, {"remote", remote}} {
-		results, err := runBrain(ctx, item.exec, "hello from brain", 200)
+		results, err := app.RunBrain(ctx, item.exec, "hello from brain", 200)
 		if err != nil {
 			t.Fatalf("%s brain: %v", item.name, err)
 		}
@@ -64,7 +69,7 @@ func TestBrainMatchesAcrossExecutors(t *testing.T) {
 			t.Fatalf("%s should report tool failure, got %v", item.name, err)
 		}
 	}
-	remote.client.stop(context.Canceled)
+	remote.Client.Stop(context.Canceled)
 	cancel() // Executor remains available after its peer leaves; stop it explicitly.
 	select {
 	case err := <-executorDone:
@@ -100,24 +105,24 @@ func TestPairsRouteConcurrently(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	g := testGateway(t, "A", "B")
 	server := httptest.NewServer(g)
-	t.Cleanup(func() { cancel(); g.close(); server.Close() })
+	t.Cleanup(func() { cancel(); g.Close(); server.Close() })
 	address := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
 	type arrival struct {
 		pair    string
-		call    toolMessage
+		call    transport.ToolMessage
 		release chan struct{}
 	}
 	arrivals := make(chan arrival, 2)
-	brains := make(map[string]*RemoteExecutor)
+	brains := make(map[string]*endpoint.RemoteExecutor)
 	for _, pair := range []string{"A", "B"} {
-		c, err := newClient(ctx, address, pair, "executor", "test-executor-"+pair)
+		c, err := endpoint.NewClient(ctx, address, pair, "executor", "test-executor-"+pair)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Test endpoint reports its own identity, so even a symmetric routing
 		// mix-up cannot pass just because an echo eventually returns home.
-		go c.run(func(s *channel, body json.RawMessage) error {
-			var call toolMessage
+		go c.Run(func(s *endpoint.Channel, body json.RawMessage) error {
+			var call transport.ToolMessage
 			if err := json.Unmarshal(body, &call); err != nil {
 				return err
 			}
@@ -136,9 +141,9 @@ func TestPairsRouteConcurrently(t *testing.T) {
 				ExecutorPair string          `json:"executor_pair"`
 				Input        json.RawMessage `json:"input"`
 			}{pair, call.Input})
-			return c.send(ctx, s, toolMessage{Kind: "result", ID: call.ID, Output: output})
+			return c.Send(ctx, s, transport.ToolMessage{Kind: "result", ID: call.ID, Output: output})
 		})
-		brains[pair], err = newRemoteExecutor(ctx, address, pair, "test-brain-"+pair)
+		brains[pair], err = endpoint.NewRemoteExecutor(ctx, address, pair, "test-brain-"+pair)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,13 +210,13 @@ func TestPairsRouteConcurrently(t *testing.T) {
 func TestGatewayRejectsAmbiguousBindings(t *testing.T) {
 	t.Setenv("TEST_BRAIN", "brain-token")
 	t.Setenv("TEST_EXECUTOR", "executor-token")
-	a := binding{Pair: "A", BrainTokenEnv: "TEST_BRAIN", ExecutorTokenEnv: "TEST_EXECUTOR"}
-	for _, config := range [][]binding{
+	a := gateway.Binding{Pair: "A", BrainTokenEnv: "TEST_BRAIN", ExecutorTokenEnv: "TEST_EXECUTOR"}
+	for _, config := range [][]gateway.Binding{
 		{a, a},
 		{a, {Pair: "B", BrainTokenEnv: "TEST_BRAIN", ExecutorTokenEnv: "TEST_EXECUTOR"}},
 	} {
-		if g, err := newGateway(config); err == nil {
-			g.close()
+		if g, err := gateway.New(config); err == nil {
+			g.Close()
 			t.Fatal("duplicate pair or reused credentials should fail at startup")
 		}
 	}

@@ -1,9 +1,9 @@
 sequenceDiagram
-    participant B as runBrain
-    participant R as Brain 的 RemoteExecutor / client
-    participant G as Gateway 的 pairRoute A
-    participant E as Executor 的 client / endpoint
-    participant T as executeTool
+    participant B as RunBrain
+    participant R as Brain 的 RemoteExecutor / Client
+    participant G as Gateway 的 PairRoute A
+    participant E as Executor 的 Client / endpoint
+    participant T as ExecuteTool
     Note over R,E: 双方已连接，网关生成本轮 epoch E1
     G->>E: state：epoch=E1（先通知执行端）
     G->>R: state：epoch=E1

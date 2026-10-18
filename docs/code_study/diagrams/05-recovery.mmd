@@ -7,9 +7,9 @@ sequenceDiagram
     B-xG: Brain 的 WS 断开
     Note over B,E: 两侧各自处理失联，发生顺序不要求同步
     B->>B: 作废旧 channel；旧 Call 失败并清除 pending
-    G->>G: remove 旧 peer；清空 epoch
+    G->>G: Remove 旧 peer；清空 epoch
     G->>E: state：epoch 为空
-    E->>E: 取消旧 channel.ctx
+    E->>E: 取消旧 Channel.Ctx
     E->>T: toolCtx 因父级取消而结束
     T-->>E: 合作工具返回
     E->>E: 释放 slot；丢弃旧结果

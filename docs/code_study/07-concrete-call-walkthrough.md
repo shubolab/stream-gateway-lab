@@ -27,19 +27,19 @@ go run . brain -mode local -message A-only -wait-ms 800
 
 读法：启动大脑，用本地方式执行工具；测试文字填 A-only，等待时长填 800 毫秒。
 
-[`main.go`](../../main.go) 的 `run` 读取命令行参数，然后调用：
+[`app/app.go`](../../internal/app/app.go) 的 `runBrainCommand` 读取命令行参数，然后调用：
 
 ```go
-runBrain(ctx, executor, "A-only", 800)
+RunBrain(ctx, executor, "A-only", 800)
 ```
 
 `-wait-ms` 是命令行参数名，`waitMS` 是 Go 函数里的变量名，`wait_ms` 是生成的 JSON 字段名。在这里它们承载同一个输入值 `800`。
 
 ## 2. 所谓“大脑”，现在实际是一段写死顺序的程序
 
-当前没有真实模型参与。`runBrain` 固定先调用 echo，再调用 wait。这里把它叫作“大脑”，是因为它负责组织工具调用步骤、读取结果并生成下一次调用参数。
+当前没有真实模型参与。`RunBrain` 固定先调用 echo，再调用 wait。这里把它叫作“大脑”，是因为它负责组织工具调用步骤、读取结果并生成下一次调用参数。
 
-两个工具都很简单，实现在 [`tools.go`](../../tools.go) 的 `executeTool`：
+两个工具都很简单，实现在 [`tools.go`](../../internal/endpoint/tools.go) 的 `ExecuteTool`：
 
 | 工具 | 普通话含义 | 输入 | 执行的事 | 成功输出 |
 | --- | --- | --- | --- | --- |
@@ -48,7 +48,7 @@ runBrain(ctx, executor, "A-only", 800)
 
 **文字 A-only 到 echo 原样返回这一步，就完成了它在本次流程中的作用。** 第二个工具只收到等待时长，不收到这段文字。
 
-先不考虑网络，`runBrain` 的全部业务动作如下：
+先不考虑网络，`RunBrain` 的全部业务动作如下：
 
 | 顺序 | 大脑做什么 | 对应代码 | 这一刻得到什么 |
 | --- | --- | --- | --- |
@@ -59,7 +59,7 @@ runBrain(ctx, executor, "A-only", 800)
 | 5 | 请 wait 等待 800 毫秒，并等待结果 | `executor.Call(ctx, "wait", input)` | `wait = {"waited_ms":800}` |
 | 6 | 把两次工具输出装进结果列表 | `return []observation{{"echo", echo}, {"wait", wait}}, nil` | 返回两条记录；随后 `run` 把它们打印到终端 |
 
-其中第 2、5 步的 `Call` 都要等到本次工具的结果或错误出现，才返回给 `runBrain`。第 2 步若失败，后面的 wait 就不会发起。
+其中第 2、5 步的 `Call` 都要等到本次工具的结果或错误出现，才返回给 `RunBrain`。第 2 步若失败，后面的 wait 就不会发起。
 
 `wait_ms` → `ms` → `waited_ms` 不是三个不同的时长：分别是**实验输入字段、wait 工具的入参字段、wait 工具的结果字段**。本例里都是 `800`。`waited_ms` 直接填写请求的时长，不是测量出来的端到端耗时；真实耗时还会受调度和通信影响。
 
@@ -91,17 +91,17 @@ runBrain(ctx, executor, "A-only", 800)
 go run . brain -mode remote -pair A -message A-only -wait-ms 800
 ```
 
-`runBrain` 得到的文字和时长没变，变化的是传进去的 `executor` 对象。
+`RunBrain` 得到的文字和时长没变，变化的是传进去的 `executor` 对象。
 
 | 运行位置 | 对象／函数 | 普通话职责 |
 | --- | --- | --- |
-| Brain 进程 | `runBrain` | 安排先 echo、再 wait，消费两次结果。 |
+| Brain 进程 | `RunBrain` | 安排先 echo、再 wait，消费两次结果。 |
 | Brain 进程 | `RemoteExecutor.Call` | 把一次工具调用变成网络请求，等待对应结果，再交回大脑。**这个对象在大脑这一侧。** |
-| Gateway 进程 | `pairRoute.ServeHTTP` | 检查本组的连接与通道状态，把消息送给本组另一端。 |
-| Executor 进程 | `executorEndpoint.receive` | 收到调用要求，安排执行工具，随后发送结果。 |
-| Executor 进程 | `executeTool` | 真正执行 echo 或启动定时器等待。 |
+| Gateway 进程 | `PairRoute.ServeHTTP` | 检查本组的连接与通道状态，把消息送给本组另一端。 |
+| Executor 进程 | `ExecutorEndpoint.Receive` | 收到调用要求，安排执行工具，随后发送结果。 |
+| Executor 进程 | `ExecuteTool` | 真正执行 echo 或启动定时器等待。 |
 
-`Executor` 是接口，意思是“大脑拿到的对象必须有一个 `Call` 方法”。启动代码 `run` 把 `executor` 设成 `RemoteExecutor` 后，`runBrain` 写的 `executor.Call(...)` 就会进入 `RemoteExecutor.Call`。它不会直接进入另一进程的函数；中间通过网络发送 JSON，另一进程收到后自行调用函数。
+`Executor` 是接口，意思是“大脑拿到的对象必须有一个 `Call` 方法”。启动代码 `runBrainCommand` 把 `executor` 设成 `RemoteExecutor` 后，`RunBrain` 写的 `executor.Call(...)` 就会进入 `RemoteExecutor.Call`。它不会直接进入另一进程的函数；中间通过网络发送 JSON，另一进程收到后自行调用函数。
 
 下图假设双方已连接、A 组可以通信。为先看清业务，图中省略外层通道标识和调用编号；后面给出消息格式。
 
@@ -115,22 +115,22 @@ go run . brain -mode remote -pair A -message A-only -wait-ms 800
 
 | 顺序 | 在哪里、哪个函数 | 收到什么 | 做什么、把什么交给下一步 |
 | --- | --- | --- | --- |
-| 1 | Brain：`runBrain` | 文字 A-only、时长 800 | 调用 `executor.Call(ctx, "echo", {"message":"A-only","wait_ms":800})`。 |
-| 2 | Brain：`RemoteExecutor.Call` | 工具名 echo 和上述 JSON | 生成本次调用编号，登记“我正在等这次结果”，组装 `kind:"call"` 消息；调用 `client.send`，然后在 `waitResult` 等结果。 |
-| 3 | Brain：`client.send` → `writeFrame` | 内层调用消息 | 加上当前通道的外层信息，写入 Brain 到网关的 WebSocket。发送函数只返回是否发送出错，不返回工具输出。 |
-| 4 | Gateway：`pairRoute.ServeHTTP` 的读循环 → `writeFrame` | 完整的网络消息 | 检查它属于 A 组当前有效通道，原样转发到 Executor A 的连接；不解释 echo 或 800。 |
-| 5 | Executor：`client.readConnection` | 网关转来的同一消息 | 校验外层信息，将 `body` 交给 `executorEndpoint.receive`。 |
-| 6 | Executor：`executorEndpoint.receive` | 工具名 echo、输入数据、调用编号和超时预算 | 检查可执行后启动一个 goroutine，在里面调用 `e.execute(toolCtx, call.Tool, call.Input)`。`runExecutor` 已把 `e.execute` 设为 `executeTool`。 |
-| 7 | Executor：`executeTool` 的 `case "echo"` | `{"message":"A-only","wait_ms":800}` | 复制这份 JSON，作为函数返回值交回工具 goroutine。 |
-| 8 | Executor：工具 goroutine → `client.send` | echo 的输出 | 组装带同一个调用编号的 `kind:"result"` 消息，`output` 填入原样返回的数据，经 WebSocket 发给网关。 |
-| 9 | Gateway：Executor 连接对应的 `pairRoute.ServeHTTP` 读循环 | 结果消息 | 检查当前通道，原样转发给 Brain A。 |
-| 10 | Brain：`client.readConnection` → `RemoteExecutor.receive` | echo 的结果消息 | 确认结果属于当前等待的那次调用，把消息放进它的 `pending.result` 收件箱。 |
-| 11 | Brain：`RemoteExecutor.waitResult` → `RemoteExecutor.Call` | 收件箱里的结果 | 确认没有超时或通道失效后，返回 `result.Output`；`Call` 结束，清除本次等待记录。 |
-| 12 | Brain：`runBrain` | `echo = {"message":"A-only","wait_ms":800}` | 第一条 `Call` 到此才成功返回。接着读取 `echo` 中的 `wait_ms`。 |
+| 1 | Brain：`RunBrain` | 文字 A-only、时长 800 | 调用 `executor.Call(ctx, "echo", {"message":"A-only","wait_ms":800})`。 |
+| 2 | Brain：`RemoteExecutor.Call` | 工具名 echo 和上述 JSON | 生成本次调用编号，登记“我正在等这次结果”，组装 `kind:"call"` 消息；调用 `Client.Send`，然后在 `WaitResult` 等结果。 |
+| 3 | Brain：`Client.Send` → `WriteFrame` | 内层调用消息 | 加上当前通道的外层信息，写入 Brain 到网关的 WebSocket。发送函数只返回是否发送出错，不返回工具输出。 |
+| 4 | Gateway：`PairRoute.ServeHTTP` 的读循环 → `WriteFrame` | 完整的网络消息 | 检查它属于 A 组当前有效通道，原样转发到 Executor A 的连接；不解释 echo 或 800。 |
+| 5 | Executor：`Client.readConnection` | 网关转来的同一消息 | 校验外层信息，将 `body` 交给 `ExecutorEndpoint.Receive`。 |
+| 6 | Executor：`ExecutorEndpoint.Receive` | 工具名 echo、输入数据、调用编号和超时预算 | 检查可执行后启动一个 goroutine，在里面调用 `e.Execute(toolCtx, call.Tool, call.Input)`。`RunExecutor` 已把 `e.Execute` 设为 `ExecuteTool`。 |
+| 7 | Executor：`ExecuteTool` 的 `case "echo"` | `{"message":"A-only","wait_ms":800}` | 复制这份 JSON，作为函数返回值交回工具 goroutine。 |
+| 8 | Executor：工具 goroutine → `Client.Send` | echo 的输出 | 组装带同一个调用编号的 `kind:"result"` 消息，`output` 填入原样返回的数据，经 WebSocket 发给网关。 |
+| 9 | Gateway：Executor 连接对应的 `PairRoute.ServeHTTP` 读循环 | 结果消息 | 检查当前通道，原样转发给 Brain A。 |
+| 10 | Brain：`Client.readConnection` → `RemoteExecutor.Receive` | echo 的结果消息 | 确认结果属于当前等待的那次调用，把消息放进它的 `Pending.Result` 收件箱。 |
+| 11 | Brain：`RemoteExecutor.WaitResult` → `RemoteExecutor.Call` | 收件箱里的结果 | 确认没有超时或通道失效后，返回 `result.Output`；`Call` 结束，清除本次等待记录。 |
+| 12 | Brain：`RunBrain` | `echo = {"message":"A-only","wait_ms":800}` | 第一条 `Call` 到此才成功返回。接着读取 `echo` 中的 `wait_ms`。 |
 
-注意第 6 步：`executorEndpoint.receive` 启动工具 goroutine 后就返回 `nil`，让连接继续接收消息。**工具结果是第 8 步另外发送的网络消息，不是 `receive` 的函数返回值。**
+注意第 6 步：`ExecutorEndpoint.Receive` 启动工具 goroutine 后就返回 `nil`，让连接继续接收消息。**工具结果是第 8 步另外发送的网络消息，不是 `Receive` 的函数返回值。**
 
-相关源码：[`executor.go`](../../executor.go)、[`client.go`](../../client.go)、[`gateway.go`](../../gateway.go)、[`executor_endpoint.go`](../../executor_endpoint.go)、[`tools.go`](../../tools.go)。`writeFrame` 虽然定义在 `gateway.go`，两端的 `client.send` 也会调用它；文件名不决定函数在哪个进程运行。
+相关源码：[`executor.go`](../../internal/endpoint/executor.go)、[`client.go`](../../internal/endpoint/client.go)、[`gateway.go`](../../internal/gateway/gateway.go)、[`executor_endpoint.go`](../../internal/endpoint/executor_endpoint.go)、[`tools.go`](../../internal/endpoint/tools.go)。`WriteFrame` 定义在共用的 [`transport/frame.go`](../../internal/transport/frame.go)，网关和两端的 `Client.Send` 都会调用它。
 
 ## 6. 网络上实际装了什么
 
@@ -168,11 +168,11 @@ Executor → Gateway → Brain，返回消息是：
 
 `wait_ms:800` 是这次业务希望等待的时长。`timeout_ms` 是本次工具调用的执行时间预算，两者用途不同；echo 会原样返回 `800`，不会因此执行等待。
 
-网关从连接建立时的 `pair=A` 知道该送到 A 组的哪一端。它不从 `message` 猜目的地，也不解析 `body` 中的工具含义。消息结构定义见 [`protocol.go`](../../protocol.go)；外层 `epoch` 的解释见[专题](06-epoch-explained.md)。
+网关从连接建立时的 `pair=A` 知道该送到 A 组的哪一端。它不从 `message` 猜目的地，也不解析 `body` 中的工具含义。消息结构定义见 [`protocol.go`](../../internal/transport/protocol.go)；外层 `epoch` 的解释见[专题](06-epoch-explained.md)。
 
 ## 7. 第二趟：拿到 800 后，执行等待
 
-第一趟返回后，`runBrain` 的 `json.Unmarshal(echo, &decision)` 得到 `decision.WaitMS = 800`，然后生成 `{"ms":800}`，调用：
+第一趟返回后，`RunBrain` 的 `json.Unmarshal(echo, &decision)` 得到 `decision.WaitMS = 800`，然后生成 `{"ms":800}`，调用：
 
 ```go
 executor.Call(ctx, "wait", input) // 此时 input 是 {"ms":800}
@@ -183,19 +183,19 @@ executor.Call(ctx, "wait", input) // 此时 input 是 {"ms":800}
 | 位置 | 这一次的动作和数据 |
 | --- | --- |
 | Brain 的 `RemoteExecutor.Call` | 新生成调用编号 `R2`；发送的 `body` 是 `{"kind":"call","id":"R2","tool":"wait","input":{"ms":800},"timeout_ms":14999}`，其中预算仍只是示例。 |
-| Gateway 的 `pairRoute.ServeHTTP` | 把这份请求原样转给 Executor A。网关不启动 800 毫秒的定时器。 |
-| Executor 的 `client.readConnection` → `executorEndpoint.receive` | 收到 wait 请求，安排执行 `executeTool(toolCtx, "wait", {"ms":800})`。 |
-| Executor 的 `executeTool` | 解析 `ms=800`；调用 `time.NewTimer(800 * time.Millisecond)`；定时器到期后返回 `{"waited_ms":800}`。 |
-| Executor 的工具 goroutine → `client.send` | 发出 `body = {"kind":"result","id":"R2","output":{"waited_ms":800}}`。 |
-| Gateway 的 `pairRoute.ServeHTTP` | 把结果原样转回 Brain A。 |
-| Brain 的 `client.readConnection` → `RemoteExecutor.receive` | 将 R2 的结果交给等待 R2 的收件箱。 |
-| Brain 的 `RemoteExecutor.waitResult` → `Call` → `runBrain` | `Call` 返回 `{"waited_ms":800}`；`runBrain` 把它保存在 `wait` 中，再汇总两次结果。 |
+| Gateway 的 `PairRoute.ServeHTTP` | 把这份请求原样转给 Executor A。网关不启动 800 毫秒的定时器。 |
+| Executor 的 `Client.readConnection` → `ExecutorEndpoint.Receive` | 收到 wait 请求，安排执行 `ExecuteTool(toolCtx, "wait", {"ms":800})`。 |
+| Executor 的 `ExecuteTool` | 解析 `ms=800`；调用 `time.NewTimer(800 * time.Millisecond)`；定时器到期后返回 `{"waited_ms":800}`。 |
+| Executor 的工具 goroutine → `Client.Send` | 发出 `body = {"kind":"result","id":"R2","output":{"waited_ms":800}}`。 |
+| Gateway 的 `PairRoute.ServeHTTP` | 把结果原样转回 Brain A。 |
+| Brain 的 `Client.readConnection` → `RemoteExecutor.Receive` | 将 R2 的结果交给等待 R2 的收件箱。 |
+| Brain 的 `RemoteExecutor.WaitResult` → `Call` → `RunBrain` | `Call` 返回 `{"waited_ms":800}`；`RunBrain` 把它保存在 `wait` 中，再汇总两次结果。 |
 
 正常情况下，两趟使用同一轮通道 `E1`，但调用编号分别是 R1、R2。等待发生在执行端的工具里；大脑这时在等工具结果，网关的读循环继续等消息。
 
 ## 8. 操作者最后看见什么
 
-一次性命令模式下，`runBrain` 返回两条 `observation`，`run` 使用 `json.Encoder.Encode` 打印为：
+一次性命令模式下，`RunBrain` 返回两条 `Observation`，`runBrainCommand` 使用 `json.Encoder.Encode` 打印为：
 
 ```json
 [
@@ -217,7 +217,7 @@ executor.Call(ctx, "wait", input) // 此时 input 是 {"ms":800}
 
 第一条记录的意思是“echo 把最初的数据送回来了”；第二条是“wait 的定时器按请求时长到期，返回成功结果”。终端上的最终列表由大脑组织，网关不生成这份汇总。
 
-本地模式同样调用两次 `Call`，但走的是 `LocalExecutor.Call` → `executeTool`，直接在 Brain 进程内完成，不需要上述网络往返。这是为什么相同的 `runBrain` 能复用。
+本地模式同样调用两次 `Call`，但走的是 `LocalExecutor.Call` → `ExecuteTool`，直接在 Brain 进程内完成，不需要上述网络往返。这是为什么相同的 `RunBrain` 能复用。
 
 ## 本轮观察与说明边界
 

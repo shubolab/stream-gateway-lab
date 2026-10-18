@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"context"
@@ -12,6 +12,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"stream-gateway-lab/internal/app"
+	"stream-gateway-lab/internal/endpoint"
+	"stream-gateway-lab/internal/gateway"
 )
 
 // Run the real CLI/signal handler in a child, with an inherited blocking pipe.
@@ -22,7 +26,7 @@ func TestBrainStdinProcess(t *testing.T) {
 	for i, arg := range os.Args {
 		if arg == "--" {
 			os.Args = append(os.Args[:1], os.Args[i+1:]...)
-			main()
+			app.Main()
 			os.Exit(0)
 		}
 	}
@@ -39,26 +43,26 @@ func TestBrainStdinStops(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 				args := []string{"-test.run=^TestBrainStdinProcess$", "--", "brain", "-mode", mode, "-stdin"}
-				var endpoint *client
+				var executorPeer *endpoint.Client
 				var address string
 				if mode == "remote" {
 					g := testGateway(t, "A")
 					server := httptest.NewServer(g)
-					t.Cleanup(func() { cancel(); g.close(); server.Close() })
+					t.Cleanup(func() { cancel(); g.Close(); server.Close() })
 					address = "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
 					config := filepath.Join(t.TempDir(), "bindings.json")
-					data, _ := json.Marshal([]binding{{Pair: "A", BrainTokenEnv: "TEST_BRAIN_A", ExecutorTokenEnv: "TEST_EXECUTOR_A"}})
+					data, _ := json.Marshal([]gateway.Binding{{Pair: "A", BrainTokenEnv: "TEST_BRAIN_A", ExecutorTokenEnv: "TEST_EXECUTOR_A"}})
 					if err := os.WriteFile(config, data, 0600); err != nil {
 						t.Fatal(err)
 					}
 					args = append(args, "-url", address, "-config", config)
 					var err error
-					endpoint, err = newClient(ctx, address, "A", "executor", "test-executor-A")
+					executorPeer, err = endpoint.NewClient(ctx, address, "A", "executor", "test-executor-A")
 					if err != nil {
 						t.Fatal(err)
 					}
-					e := &executorEndpoint{client: endpoint, execute: executeTool}
-					go endpoint.run(e.receive)
+					e := &endpoint.ExecutorEndpoint{Client: executorPeer, Execute: endpoint.ExecuteTool}
+					go executorPeer.Run(e.Receive)
 				}
 				cmd := exec.Command(os.Args[0], args...)
 				cmd.Env = append(os.Environ(), "LAB_TEST_STDIN_CHILD=1")
@@ -87,7 +91,7 @@ func TestBrainStdinStops(t *testing.T) {
 				result := make(chan error, 1)
 				go func() {
 					var response struct {
-						Results []observation `json:"results"`
+						Results []app.Observation `json:"results"`
 					}
 					err := json.NewDecoder(stdout).Decode(&response)
 					if err == nil && (len(response.Results) != 2 || string(response.Results[1].Output) != `{"waited_ms":0}`) {
@@ -103,9 +107,9 @@ func TestBrainStdinStops(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal("Brain did not finish the initial request")
 				}
-				var old *channel
-				if endpoint != nil {
-					old = endpoint.snapshot()
+				var old *endpoint.Channel
+				if executorPeer != nil {
+					old = executorPeer.Snapshot()
 					if old == nil {
 						t.Fatal("Executor must still be connected")
 					}
@@ -135,9 +139,9 @@ func TestBrainStdinStops(t *testing.T) {
 					t.Fatal("Brain did not exit within 2 seconds; pipe writer is still open")
 				}
 				t.Logf("%s: exit code 0 after %s (race builds include runtime exit delay)", ending, time.Since(stoppedAt))
-				if endpoint != nil {
+				if executorPeer != nil {
 					select {
-					case <-old.ctx.Done():
+					case <-old.Ctx.Done():
 					case <-time.After(time.Second):
 						t.Fatal("gateway did not invalidate the old channel")
 					}
@@ -145,15 +149,15 @@ func TestBrainStdinStops(t *testing.T) {
 					// gateway cleanup released its slot and the Executor stayed up.
 					freshCtx, stop := context.WithTimeout(ctx, time.Second)
 					defer stop()
-					fresh, err := newRemoteExecutor(freshCtx, address, "A", "test-brain-A")
+					fresh, err := endpoint.NewRemoteExecutor(freshCtx, address, "A", "test-brain-A")
 					if err != nil {
 						t.Fatalf("Brain identity not reusable: %v", err)
 					}
-					defer fresh.client.stop(context.Canceled)
-					if err := endpoint.waitReady(freshCtx); err != nil {
+					defer fresh.Client.Stop(context.Canceled)
+					if err := executorPeer.WaitReady(freshCtx); err != nil {
 						t.Fatal(err)
 					}
-					if endpoint.snapshot().conn != old.conn {
+					if executorPeer.Snapshot().Conn != old.Conn {
 						t.Fatal("healthy Executor socket was replaced")
 					}
 					output, err := fresh.Call(freshCtx, "echo", json.RawMessage(`"after-stop"`))

@@ -1,11 +1,11 @@
 flowchart TB
     subgraph BP[Brain 进程：默认一次性模式]
-        BM[main 的 ctx<br/>进程退出信号]
-        BC[client.ctx<br/>端点总寿命]
+        BM[app.Main 的 ctx<br/>进程退出信号]
+        BC[Client.Ctx<br/>端点总寿命]
         BCall[Call 内派生的 ctx<br/>最多 15 秒，父级可更早结束]
         BD[dialCtx<br/>一次拨号最多 5 秒]
         BR[读循环 ctx<br/>本条 WS 的保活与读取]
-        BS[channel.ctx<br/>本轮 epoch 的有效期]
+        BS[Channel.Ctx<br/>本轮 epoch 的有效期]
         BM --> BC
         BM --> BCall
         BC --> BD
@@ -13,10 +13,10 @@ flowchart TB
         BC --> BS
     end
     subgraph EP[Executor 进程：独立的 context 树]
-        EM[main 的 ctx<br/>进程退出信号]
-        EC[client.ctx<br/>端点总寿命]
+        EM[app.Main 的 ctx<br/>进程退出信号]
+        EC[Client.Ctx<br/>端点总寿命]
         ER[读循环 ctx<br/>本条 WS 的保活与读取]
-        ES[channel.ctx<br/>本轮 epoch 的有效期]
+        ES[Channel.Ctx<br/>本轮 epoch 的有效期]
         ET[toolCtx<br/>工具执行期限]
         EM --> EC
         EC --> ER

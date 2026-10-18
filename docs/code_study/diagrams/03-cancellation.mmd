@@ -1,19 +1,19 @@
 flowchart TB
     subgraph BP[Brain 进程]
-        A[waitResult<br/>调用 ctx 已到期或取消]
-        B[disconnect<br/>原 channel 还是当前通道吗]
+        A[WaitResult<br/>调用 ctx 已到期或取消]
+        B[Disconnect<br/>原 channel 还是当前通道吗]
         C[作废原 channel<br/>关闭本端 WS]
         A --> B -->|仍是当前| C
         B -->|已经换代| X[不关闭新通道]
     end
     subgraph GP[Gateway 进程]
         D[读循环发现<br/>Brain 连接断开]
-        E[remove 清空该组 epoch]
+        E[Remove 清空该组 epoch]
         F[向健康 Executor<br/>发送空 epoch 状态]
         D --> E --> F
     end
     subgraph EP[Executor 进程]
-        G[作废旧 channel.ctx]
+        G[作废旧 Channel.Ctx]
         H[子 context：toolCtx<br/>收到取消]
         I[工具检查 Done 后返回<br/>返回才释放 slot]
         J[工具忽略取消继续执行<br/>slot 保持占用]
