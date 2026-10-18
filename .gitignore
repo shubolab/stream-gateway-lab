@@ -1,2 +1,11 @@
 /stream-gateway-lab
 /bindings.local.json
+/data/
+/dist/
+/executor.json
+/brain/.venv/
+**/__pycache__/
+/brain/.pytest_cache/
+/brain/.ruff_cache/
+/brain/model.local.json
+/brain/.env

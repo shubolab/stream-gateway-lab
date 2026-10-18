@@ -1,5 +1,7 @@
 # 执行决策分离：最小实验设计与实施计划
 
+> 阶段说明：本文保留第一阶段设计。共享池、Web 调度、安装注册见[第二阶段设计](pool-control-plane.md)；Python + DeepAgents、Responses API、固定 Executor 聊天与离线降级见[第三阶段说明](agent-chat.md)。
+
 - 日期：2026-10-17
 - 依据：[需求梳理](./requirements.md)。本版收缩前版工程规模，保留已确认的架构与失败语义。
 - 当前状态：M1 [一对闭环](./step-1-results.md)、M2 [两组并发隔离](./step-2-pair-isolation-results.md)、M3 [明确断线恢复](./disconnect-reconnect-results.md)及[心跳检测静默失联](./heartbeat-silent-loss-results.md)、M4 [epoch 切换与迟到事件](./epoch-late-events-results.md)、M5 [远程工具忽略取消](./uncancellable-tool-results.md)、M6 重拨额度及[超时与结果竞争](./timeout-result-race-results.md)分项已验证。以下仍包含尚未实现的独立 cancel 消息及其他故障验收约定。

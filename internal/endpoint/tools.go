@@ -34,6 +34,8 @@ func ExecuteTool(ctx context.Context, name string, input json.RawMessage) (json.
 				WaitedMS int `json:"waited_ms"`
 			}{args.MS})
 		}
+	case "system_info", "fs_ls", "fs_read", "fs_write", "fs_edit", "fs_glob", "fs_grep", "shell_exec":
+		return executeMachineTool(ctx, name, input)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}

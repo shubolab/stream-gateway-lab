@@ -1,0 +1,19 @@
+[Unit]
+Description=Cloudflare Tunnel for Stream Gateway Lab
+After=network-online.target stream-gateway-lab.service
+Wants=network-online.target stream-gateway-lab.service
+
+[Service]
+User=cloudflared-gateway
+Group=cloudflared-gateway
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/cloudflared/gateway-lab/config.yml tunnel run
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

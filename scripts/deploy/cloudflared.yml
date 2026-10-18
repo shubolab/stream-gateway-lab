@@ -1,0 +1,7 @@
+tunnel: 19f6c587-117d-4bc6-ac49-0c82168d1f7a
+credentials-file: /etc/cloudflared/gateway-lab/credentials.json
+metrics: 127.0.0.1:20242
+ingress:
+  - hostname: gateway-lab.shubolab.com
+    service: http://127.0.0.1:8787
+  - service: http_status:404

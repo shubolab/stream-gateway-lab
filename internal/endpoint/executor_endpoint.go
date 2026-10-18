@@ -62,6 +62,10 @@ func RunExecutor(ctx context.Context, address, pair, token string) error {
 	if err != nil {
 		return err
 	}
+	return RunExecutorClient(ctx, c)
+}
+
+func RunExecutorClient(ctx context.Context, c *Client) error {
 	defer c.Stop(context.Canceled)
 	executorPeer := &ExecutorEndpoint{Client: c, Execute: ExecuteTool}
 	c.Run(executorPeer.Receive)

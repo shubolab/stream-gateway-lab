@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gateway · Agent Workspace</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <section id="login" class="login-panel">
+    <div class="brand-mark">⌘</div><h1>你的远程工作台</h1><p>连接 Gateway，在选定的机器上与 Agent 一起工作。</p>
+    <form id="login-form"><label for="admin-token">管理密钥</label><input id="admin-token" type="password" autocomplete="current-password" required placeholder="Gateway 管理密钥"><button class="primary" type="submit">进入工作台</button><p id="login-error" class="error" role="alert"></p></form>
+  </section>
+  <div id="console" class="app" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="/"><span>⌘</span> Gateway <small>LAB</small></a>
+      <button id="new-chat" class="new-chat">＋ 新建会话</button>
+      <div class="sidebar-label">会话</div><nav id="session-list" aria-label="会话列表"></nav>
+      <div class="sidebar-bottom"><button id="model-settings" class="sidebar-button">⚙ 模型设置</button><button id="add-executor" class="sidebar-button">▤ 接入 Executor</button><div id="pool-count" class="subtle"></div><button id="logout" class="sidebar-button">退出工作台</button></div>
+    </aside>
+    <main class="chat-pane">
+      <header class="chat-header"><div><h1 id="chat-title">新的一项工作</h1><div id="binding" class="subtle">先选择执行端，再开始会话</div></div><div class="header-status"><span id="mode" class="badge">未选择执行端</span><span class="access" title="工具直接执行，不需要审批">完全访问</span></div></header>
+      <div id="page-error" class="banner error" role="alert" hidden></div>
+      <div id="model-banner" class="banner" hidden>模型尚未配置。<button id="configure-model" class="text-button">配置模型</button></div>
+      <div id="offline-banner" class="banner offline" hidden>Executor 已离线 · 当前仅聊天，机器工具已禁用。重新上线后，下一轮恢复工具能力。</div>
+      <section id="timeline" class="timeline" aria-label="聊天记录"><div class="welcome"><span class="welcome-icon">⌘</span><h2>今天想完成什么？</h2><p>选择一台在线机器，开始一段会话。</p><button id="welcome-new" class="primary">新建会话</button></div></section>
+      <div class="composer-area"><form id="message-form" class="composer"><label class="sr-only" for="message">发送消息</label><textarea id="message" rows="2" maxlength="16000" placeholder="描述任务，或继续聊聊…" disabled></textarea><div class="composer-bar"><span id="composer-note">每个会话固定绑定一台 Executor</span><button id="stop-turn" class="stop" type="button" hidden aria-label="停止当前轮">■ 停止</button><button id="send-message" class="send" type="submit" disabled aria-label="发送消息">↑</button></div></form><div class="composer-footnote">Enter 发送 · Shift + Enter 换行</div></div>
+    </main>
+  </div>
+  <dialog id="new-dialog"><form id="session-form"><div class="dialog-heading"><h2>新建会话</h2><button id="close-new" class="icon-button" type="button" aria-label="关闭">×</button></div><p>选择在线且空闲的 Executor。会话创建后保持绑定。</p><label for="executor-select">执行端</label><select id="executor-select" required></select><label for="workdir">工作目录</label><input id="workdir" value="/tmp" required placeholder="执行端上的绝对路径"><p class="subtle">用于相对路径和命令的起始目录；完全访问模式下也可以操作其他路径。</p><p id="session-error" class="error" role="alert"></p><button id="create-session" class="primary wide" type="submit">开始会话</button></form></dialog>
+  <dialog id="install-dialog"><div class="dialog-heading"><h2>接入 Executor</h2><button id="close-install" class="icon-button" aria-label="关闭">×</button></div><p>支持 Linux / amd64 和 macOS / arm64。执行端主动连接 Gateway。</p><label for="gateway-origin">Gateway 地址</label><input id="gateway-origin" type="url"><label for="executor-platform">安装平台</label><select id="executor-platform"><option value="darwin/arm64">macOS / arm64</option><option value="linux/amd64">Linux / amd64</option></select><label for="executor-name">机器名称</label><input id="executor-name" maxlength="80" value="my-mac"><button id="generate-install" class="primary wide">生成安装命令</button><p id="install-error" class="error" role="alert"></p><div id="install-output" hidden><div class="code-heading"><span id="expiry"></span><button id="copy-command" class="text-button">复制</button></div><pre id="install-command"></pre><p class="subtle">注册码一次有效。已安装的 Executor 可用相同安装路径更新，保留注册身份。</p></div></dialog>
+  <dialog id="model-dialog"><form id="model-form"><div class="dialog-heading"><h2>模型设置</h2><button id="close-model" class="icon-button" type="button" aria-label="关闭">×</button></div><p>使用 OpenAI Responses API。配置保存在 Gateway，保存后下一轮生效。</p><label for="model-base-url">API 地址</label><input id="model-base-url" type="url" required maxlength="2048" placeholder="https://api.openai.com/v1"><p class="subtle">填写 API 基址，通常以 /v1 结尾，不要追加 /responses。</p><label for="model-name">模型名称</label><input id="model-name" required maxlength="256" autocomplete="off" placeholder="服务商提供的模型 ID"><label for="model-api-key">API 密钥</label><input id="model-api-key" type="password" maxlength="4096" autocomplete="off" placeholder="填写 API 密钥"><p id="model-key-hint" class="subtle"></p><p id="model-error" class="error" role="alert"></p><p id="model-saved" class="subtle" role="status"></p><button id="save-model" class="primary wide" type="submit">保存配置</button></form></dialog>
+</body>
+</html>

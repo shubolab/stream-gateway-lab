@@ -30,6 +30,7 @@ type PairRoute struct {
 	tokens map[string]string
 	Peers  map[string]*Peer
 	Epoch  string
+	pool   bool
 }
 
 func New(bindings []Binding) (*Gateway, error) {
@@ -110,16 +111,17 @@ func (g *PairRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 1. 按角色取出预设凭证。known 为 false 表示请求使用了未知角色。
 	// 任意一项校验失败都返回同一个 401；凭证使用 ConstantTimeCompare 比较。
 	role := r.URL.Query().Get("role")
+	g.Mu.Lock()
 	token, known := g.tokens[role]
-	if r.URL.Path != "/ws" || r.URL.Query().Get("pair") != g.pair || !known ||
+	if r.URL.Path != "/ws" || r.URL.Query().Get("pair") != g.pair || !known || token == "" ||
 		subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
+		g.Mu.Unlock()
 		http.Error(w, "invalid endpoint credentials", http.StatusUnauthorized)
 		return
 	}
 	// 2. 先占位再握手：p.Conn 暂时为空，但该角色已经被占用。
 	// 检查和占位必须在同一把锁内完成，否则并发请求可能同时通过重复连接检查。
 	p := &Peer{}
-	g.Mu.Lock()
 	if g.Peers[role] != nil {
 		g.Mu.Unlock()
 		http.Error(w, "endpoint already connected", http.StatusConflict)
@@ -140,11 +142,19 @@ func (g *PairRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer conn.CloseNow()
 	// transport.MessageLimit 当前为 64 KiB；超过限制会使后续读取失败，进而退出本函数。
 	conn.SetReadLimit(transport.MessageLimit)
-	ctx, cancel := transport.HeartbeatContext(r.Context(), conn)
+	heartbeat := transport.HeartbeatContext
+	if g.pool {
+		heartbeat = transport.PoolHeartbeatContext
+	}
+	ctx, cancel := heartbeat(r.Context(), conn)
 	defer cancel(context.Canceled)
 
 	// 4. 保存握手成功的连接，再检查对端是否也已完成握手。
 	g.Mu.Lock()
+	if g.Peers[role] != p {
+		g.Mu.Unlock()
+		return // 调度层可能在握手期间撤销了这次任务。
+	}
 	p.Conn = conn
 	log.Printf("gateway pair=%s role=%s connected", g.pair, role)
 	other := g.Peers[opposite(role)]

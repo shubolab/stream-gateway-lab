@@ -1,5 +1,7 @@
 # 云端决策与用户环境执行分离实验：需求梳理
 
+> 阶段说明：本文记录第一阶段的约束。共享 Executor 池、Web 调度、安装注册见[第二阶段设计](pool-control-plane.md)。当前阶段的 Python + DeepAgents、Responses API、完全访问聊天和离线降级要求见[第三阶段说明](agent-chat.md)。
+
 - 日期：2026-10-17
 - 状态：核心语义已确认；首轮按最小实验收敛，工程选择见配套设计。
 - 当前交付：已完成[一对闭环与本地／远程对照](./step-1-results.md)、[两组并发隔离](./step-2-pair-isolation-results.md)、[明确断线后的失败、取消和有限重连](./disconnect-reconnect-results.md)、[心跳与静默失联检测](./heartbeat-silent-loss-results.md)、[工具忽略取消时的执行槽占用验证](./uncancellable-tool-results.md)、[epoch 切换与迟到事件验证](./epoch-late-events-results.md)，以及[调用超时与结果竞争验证](./timeout-result-race-results.md)。CLI 使用两个独立 Brain 进程；M4、M5 和本轮 M6 超时恢复通过单进程内的真实 WS 自动测试验证，超时与结果同时就绪另用定点单元测试验证。

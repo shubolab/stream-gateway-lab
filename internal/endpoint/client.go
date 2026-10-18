@@ -38,6 +38,7 @@ type Client struct {
 	Stop                context.CancelCauseFunc
 	address, pair, role string
 	token               string
+	keepIdle            bool // 池中的执行端可以长期在线等待下一次任务。
 	mu                  sync.Mutex
 	conn                *websocket.Conn
 	current             *Channel
@@ -55,6 +56,14 @@ func NewClient(ctx context.Context, address, pair, role, token string) (*Client,
 	u.RawQuery = q.Encode()
 	ctx, stop := context.WithCancelCause(ctx)
 	return &Client{Ctx: ctx, Stop: stop, address: u.String(), pair: pair, role: role, token: token, changed: make(chan struct{})}, nil
+}
+
+func NewPoolClient(ctx context.Context, address, id, token string) (*Client, error) {
+	c, err := NewClient(ctx, address, id, "executor", token)
+	if err == nil {
+		c.keepIdle = true
+	}
+	return c, err
 }
 
 // Only transport connections are retried. There is no outbound business queue.
@@ -110,9 +119,17 @@ func (c *Client) Run(handle func(*Channel, json.RawMessage) error) {
 // Read uses the connection lifetime, never a tool deadline. A healthy socket
 // stays connected while its peer is offline, but only waits a bounded time.
 func (c *Client) readConnection(conn *websocket.Conn, handle func(*Channel, json.RawMessage) error) error {
-	ctx, cancel := transport.HeartbeatContext(c.Ctx, conn)
+	heartbeat := transport.HeartbeatContext
+	if c.keepIdle {
+		heartbeat = transport.PoolHeartbeatContext
+	}
+	ctx, cancel := heartbeat(c.Ctx, conn)
 	defer cancel(context.Canceled)
-	timer := time.AfterFunc(peerWait, func() { cancel(errPeerWait) })
+	timer := time.AfterFunc(peerWait, func() {
+		if !c.keepIdle {
+			cancel(errPeerWait)
+		}
+	})
 	defer timer.Stop()
 	waiting := true
 	for {

@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	HeartbeatInterval = time.Second
-	HeartbeatTimeout  = 2 * time.Second
+	HeartbeatInterval     = time.Second
+	HeartbeatTimeout      = 2 * time.Second
+	PoolHeartbeatInterval = 5 * time.Second
+	PoolHeartbeatTimeout  = 10 * time.Second
 )
 
 var ErrHeartbeat = errors.New("heartbeat failed")
@@ -19,9 +21,18 @@ var ErrHeartbeat = errors.New("heartbeat failed")
 // Watch exactly one socket, including while waiting for its paired endpoint.
 // The caller must keep reading: websocket.Read handles Ping/Pong control frames.
 func HeartbeatContext(parent context.Context, conn *websocket.Conn) (context.Context, context.CancelCauseFunc) {
+	return heartbeatContext(parent, conn, HeartbeatInterval, HeartbeatTimeout)
+}
+
+// 公网池经过代理和隧道，允许更长的 Pong 往返；静态局域网实验保留原有时限。
+func PoolHeartbeatContext(parent context.Context, conn *websocket.Conn) (context.Context, context.CancelCauseFunc) {
+	return heartbeatContext(parent, conn, PoolHeartbeatInterval, PoolHeartbeatTimeout)
+}
+
+func heartbeatContext(parent context.Context, conn *websocket.Conn, interval, timeout time.Duration) (context.Context, context.CancelCauseFunc) {
 	ctx, cancel := context.WithCancelCause(parent)
 	go func() {
-		ticker := time.NewTicker(HeartbeatInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -29,7 +40,7 @@ func HeartbeatContext(parent context.Context, conn *websocket.Conn) (context.Con
 				return
 			case <-ticker.C:
 			}
-			pingCtx, stop := context.WithTimeout(ctx, HeartbeatTimeout)
+			pingCtx, stop := context.WithTimeout(ctx, timeout)
 			err := conn.Ping(pingCtx)
 			stop()
 			if err != nil {

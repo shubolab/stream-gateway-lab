@@ -1,0 +1,24 @@
+[Unit]
+Description=Stream Gateway Lab control plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=stream-gateway-lab
+Group=stream-gateway-lab
+WorkingDirectory=/opt/stream-gateway-lab/current
+ExecStart=/opt/stream-gateway-lab/current/stream-gateway-lab gateway -listen 127.0.0.1:8787 -data-dir /var/lib/stream-gateway-lab -downloads /opt/stream-gateway-lab/current/downloads -brain-python /opt/stream-gateway-lab/current/brain/.venv/bin/python -brain-dir /opt/stream-gateway-lab/current/brain -model-config /var/lib/stream-gateway-lab/model.json
+Environment=GIN_MODE=release
+StateDirectory=stream-gateway-lab
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

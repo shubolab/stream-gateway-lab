@@ -1,5 +1,38 @@
 # stream-gateway-lab
 
+## 当前：Python + DeepAgents 聊天工作台
+
+Gateway / Executor 保持 Go，Brain 使用 Python + DeepAgents，通过 OpenAI Responses API 思考并调用固定 Executor 的文件与 shell 工具。页面采用精简聊天布局，默认完全访问、无需工具审批；创建会话前必须选择在线 Executor，掉线后已有会话降为仅聊天，下一轮在重新上线后恢复工具能力。
+
+```sh
+sh scripts/setup-brain.sh
+sh scripts/build-distribution.sh
+./dist/stream-gateway-lab gateway -listen 0.0.0.0:8787
+```
+
+打开 Gateway 地址，用 `data/admin-token` 登录，在侧栏「模型设置」填写 API 地址、模型名称和密钥，保存后下一轮生效，无需重启。接入或更新 Executor，然后选机器和工作目录开始会话。会话与轮记录落盘；支持多轮上下文、工具轨迹和停止。目前已用 Responses 测试服务验证真实 DeepAgents / Go 进程的完整修复链路，真实模型效果仍待验收。
+
+详细状态机、目录职责、API 配置和验收步骤见 [第三阶段说明](docs/agent-chat.md)。公网入口：[gateway-lab.shubolab.com](https://gateway-lab.shubolab.com)，服务器模型配置位于 `/var/lib/stream-gateway-lab/model.json`。
+
+## 第二阶段记录：共享 Executor 池与 Web 调度
+
+这一阶段新增 Gin 控制台：Linux/amd64 与 macOS/arm64 安装助手注册机器入池，选择 Executor 创建任务，Gateway 预占该成员并启动独立 Brain 子进程，运行同一份 echo → wait 流程。所有机器属于同一个共享池。旧任务 API 保留；默认页面已升级为上述聊天工作台。
+
+```sh
+sh scripts/build-distribution.sh
+./dist/stream-gateway-lab gateway -listen 0.0.0.0:8787
+```
+
+打开 Gateway 的 HTTP 根地址，用 `data/admin-token` 中的共享管理密钥登录（也可设置 `LAB_ADMIN_TOKEN`）。点击「接入 Executor」生成安装命令；将 Gateway 地址设置为外部 Linux 主机可达的地址。机器上线后，选择它、填写 message 和 wait_ms，启动任务并查看结果或停止进程。
+
+注册身份保存在数据目录；任务结果只保留在当前 Gateway 会话。忙碌或离线的机器拒绝新任务，失败任务不自动重跑。详见[第二阶段设计、安装与 API](docs/pool-control-plane.md)和[本轮验收记录](docs/pool-acceptance-results.md)。
+
+公网实验入口：<https://gateway-lab.shubolab.com>。登录、macOS 安装与服务维护见 [homelab 部署说明](docs/homelab-deployment.md)。
+
+**下文保留第一阶段的静态绑定实验。现在默认 `gateway` 启动共享池，旧实验需要显式指定 `gateway -config bindings.example.json`。**
+
+## 第一阶段：静态绑定实验
+
 当前实验：两对大脑（Brain）和执行端（Executor）通过同一个网关（Gateway）并发调用 `echo`、`wait`；支持心跳检测静默失联及有限重连，旧调用失败且不重放。一个 Go 程序、三个角色入口、两组静态绑定，没有其他服务依赖。
 
 代码阅读与持续讨论入口：[docs/code_study](docs/code_study/README.md)，包含架构图、`ctx`／`pair`／`epoch` 术语对照、调用与恢复时序，以及讨论记录。
@@ -45,7 +78,7 @@ go build -o stream-gateway-lab .
 ```sh
 LAB_BRAIN_TOKEN=brain-A-demo LAB_EXECUTOR_TOKEN=executor-A-demo \
 LAB_BRAIN_B_TOKEN=brain-B-demo LAB_EXECUTOR_B_TOKEN=executor-B-demo \
-./stream-gateway-lab gateway
+./stream-gateway-lab gateway -config bindings.example.json
 ```
 
 终端 2，启动执行端 A：
